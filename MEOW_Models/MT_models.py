@@ -1,21 +1,9 @@
-import pandas as pd
-import numpy as np
-import matplotlib
-import matplotlib.pyplot as plt
-import seaborn as sns
-import json
-
+from transformers import BertModel, BertTokenizer, BertPreTrainedModel
 import torch
-from torch.utils.data import Dataset
-
-from transformers import BertModel
-from transformers import BertTokenizer
-from transformers import BertPreTrainedModel
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 
-from typing import *
-
+from MEOW_Utils.QA_utils import*
 
 class BertWithoutEmbedding(BertPreTrainedModel):
     
@@ -129,5 +117,3 @@ class BertWithoutEmbedding(BertPreTrainedModel):
             attentions=encoder_outputs.attentions,
             cross_attentions=encoder_outputs.cross_attentions,
         )
-
-
