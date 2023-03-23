@@ -2,13 +2,8 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 from torch.nn.utils.rnn import pad_sequence
 
-import pandas as pd
-import numpy as np
-import json
-
 import torch
 from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
 
 from typing import *
 
@@ -26,12 +21,10 @@ def collate_batch(sample): #sample is List
 
     return input_ids_batch, mask_batch, token_batch, SEP_index_batch, Start_batch, End_batch
 
-
 def pading_empty_tensor(context_LHL):  #context(QA) last hidden layer, this is padding for lstm because the context length may be difference
     seqlen = [s.size(0) for s in context_LHL]
     data = pack_padded_sequence(context_LHL, seqlen, batch_first=True, enforce_sorted=False)
     return data
-
 
 def get_retrieve_context_matrix(SEPind:List, seq_len, hidden_layer_size): #last hidden layer
     num = len(SEPind)  #通常是 batch size
@@ -44,7 +37,6 @@ def get_retrieve_context_matrix(SEPind:List, seq_len, hidden_layer_size): #last 
     
     return mtx
     
-
 # create dataset
 class QAdataset(Dataset):
     def __init__(self, df, tokenizer):
