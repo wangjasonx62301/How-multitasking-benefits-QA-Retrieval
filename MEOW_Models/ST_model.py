@@ -6,12 +6,22 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 
 from MEOW_Models.Kernel_model import BertWithoutEmbedding
-from MEOW_Utils.QA_utils import*
+from typing import*
+
+from transformers.models.bert.modeling_bert import BertEmbeddings
+from MEOW_Utils.QAmodel_utils import get_retrieve_context_matrix, pading_empty_tensor
+
 
 ## one sequence claassification 是由 [CLS] 的 contextualize embedding 完之結果再進行 classifier
 
 class Bert_classification(torch.nn.Module):
-    def __init__(self, model:BertWithoutEmbedding, embedding_layer, device, num_labels):
+    def __init__(
+        self,
+        model : BertWithoutEmbedding,
+        embedding_layer : BertEmbeddings,
+        device,
+        num_labels : int
+        ):
         super(Bert_classification, self).__init__()
         
         self.device = device
@@ -57,7 +67,13 @@ class Bert_classification(torch.nn.Module):
 ## 不過因 [SEP] 在每個 train dataset 都是不同位置，不確定效能是否會變差
 
 class Bert_pairwise(torch.nn.Module):
-    def __init__(self, model:BertWithoutEmbedding, embedding_layer, device, num_labels):
+    def __init__(
+        self,
+        model : BertWithoutEmbedding,
+        embedding_layer : BertEmbeddings,
+        device,
+        num_labels : int
+        ):
         super(Bert_pairwise, self).__init__()
         
         self.device = device
@@ -102,7 +118,12 @@ class Bert_pairwise(torch.nn.Module):
 ## 仍可修改 , LSTM 理想狀態是兩層
 
 class Bert_QA(torch.nn.Module):
-    def __init__(self, model:BertWithoutEmbedding, embedding_layer, device):
+    def __init__(
+        self,
+        model : BertWithoutEmbedding,
+        embedding_layer : BertEmbeddings,
+        device
+        ):
         super(Bert_QA, self).__init__()
         
         self.device = device

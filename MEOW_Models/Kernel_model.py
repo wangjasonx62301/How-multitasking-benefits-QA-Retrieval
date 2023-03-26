@@ -2,8 +2,7 @@ from transformers import BertModel, BertTokenizer, BertPreTrainedModel
 import torch
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
-
-from MEOW_Utils.QA_utils import*
+from typing import *
 
 class BertWithoutEmbedding(BertPreTrainedModel):
     

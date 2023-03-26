@@ -3,8 +3,14 @@ from sklearn.utils import shuffle
 import pandas as pd
 import numpy as np
 import json
-from MEOW_Utils import QA_utils, Pairwise_utils, Classification_utils
 from torch.utils.data import DataLoader
+from transformers.models.bert.modeling_bert import BertModel
+from pandas import DataFrame
+from transformers import BertTokenizer
+from sklearn.model_selection import train_test_split
+from torch.utils.data import Dataset
+from torch.nn.utils.rnn import pad_sequence
+import torch
 
 # other helper function
 def get_balanced_df(df, column_name):
@@ -64,7 +70,17 @@ def count_the_TKbeg_and_TKend(context, ans_start, answer, tokenizer):
 
     return TKstart+1, TKend+1 # +1 because of [CLS]
 
-#get dataframe
+class get_bert_element():
+    def __init__(self, bertmodel):
+        self.bertmodel = bertmodel
+
+    def get_copy_embeddings_layer(self):
+        embedding_layer = copy.deepcopy(self.bertmodel.embeddings)
+        return embedding_layer
+
+# get dataframe
+# the CoLA and Sentiment don't need the tokenizer
+# MNLI and RTE and SQuAD need the tokenizer to find the [SEP]'s index
 def get_MNLI_df(file_path, tokenizer, data_size = 0):
     train_df = pd.read_csv(file_path)
     if(data_size != 0):
@@ -105,7 +121,7 @@ def get_RTE_df(file_path, tokenizer, data_size = 0):
 
     return train_df
 
-def get_CoLA_df(file_path, data_size = 0):
+def get_CoLA_df(file_path, tokenizer = None, data_size = 0):
     train_df = pd.read_csv(file_path)
     if(data_size != 0):
         train_df = train_df[0:data_size]
@@ -118,7 +134,7 @@ def get_CoLA_df(file_path, data_size = 0):
     train_df = balanced_df
     return train_df
 
-def get_Sentiment_df(file_path, data_size = 0):
+def get_Sentiment_df(file_path, tokenizer = None, data_size = 0):
     train_df = pd.read_csv(file_path)
     if(data_size != 0):
         train_df = train_df[0:data_size]
@@ -133,7 +149,7 @@ def get_Sentiment_df(file_path, data_size = 0):
 
     return train_df
 
-def get_SQuAD_df(file_path, tokenizer, data_size = 0):
+def get_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     #處理好 dataframe
     df_train = pd.read_csv(file_path)
     if(data_size != 0):
@@ -168,34 +184,204 @@ def get_SQuAD_df(file_path, tokenizer, data_size = 0):
     
     return df_train
 
-#get dataset
+get_dataframe_dict = {
+                        'CoLA': get_CoLA_df, 
+                        'Sentiment' : get_Sentiment_df, 
+                        'MNLI' : get_MNLI_df,
+                        'RTE' : get_RTE_df,
+                        'SQuAD' : get_SQuAD_df }
+
+def get_dataframe(file_path, dataset_name, tokenizer = None, data_size = 0):
+    df = get_dataframe_dict[dataset_name](file_path, tokenizer, data_size)
+    return df
+
+# get dataset
 def get_MNLI_dataset(df_MNLI, tokenizer, num_labels):
-    return Pairwise_utils.Pairwise_dataset(df_MNLI, tokenizer, num_labels)
+    return Pairwise_dataset(df_MNLI, tokenizer, num_labels)
 
 def get_RTE_dataset(df_RTE, tokenizer, num_labels):
-    return Pairwise_utils.Pairwise_dataset(df_RTE, tokenizer, num_labels)
+    return Pairwise_dataset(df_RTE, tokenizer, num_labels)
 
 def get_CoLA_dataset(df_CoLA, tokenizer, num_labels):
-    return Classification_utils.Classification_dataset(df_CoLA, tokenizer, num_labels)
+    return Classification_dataset(df_CoLA, tokenizer, num_labels)
 
 def get_Sentiment_dataset(df_Sentiment, tokenizer, num_labels):
-    return Classification_utils.Classification_dataset(df_Sentiment, tokenizer, num_labels)
+    return Classification_dataset(df_Sentiment, tokenizer, num_labels)
 
-def get_SQuAD_dataset(df_SQuAD, tokenizer):
-    return QA_utils.QAdataset(df_SQuAD, tokenizer=tokenizer)
+def get_SQuAD_dataset(df_SQuAD, tokenizer, num_labels = None): #num_labels hasn't use but for formalize
+    return QAdataset(df_SQuAD, tokenizer=tokenizer)
+
+get_dataset_dict = {
+                    'CoLA': get_CoLA_dataset, 
+                    'Sentiment' : get_Sentiment_dataset, 
+                    'MNLI' : get_MNLI_dataset,
+                    'RTE' : get_RTE_dataset,
+                    'SQuAD' : get_SQuAD_dataset }
+
+def get_dataset(df, dataset_name, tokenizer = None, num_labels = None):
+    dataset = get_dataset_dict[dataset_name](df, tokenizer, num_labels)
+    return dataset
+
+# collate batch function
+def QA_collate_batch(sample): #sample is List
+    input_ids_batch = [s[0] for s in sample]
+    mask_batch = [s[1] for s in sample]
+    token_batch = [s[2] for s in sample]
+    Start_batch = [s[3] for s in sample]
+    End_batch = [s[4] for s in sample]
+    SEP_index_batch = [s[5] for s in sample]
+
+    input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
+    mask_batch = pad_sequence(mask_batch, batch_first=True)
+    token_batch = pad_sequence(token_batch, batch_first=True)
+
+    return input_ids_batch, mask_batch, token_batch, SEP_index_batch, Start_batch, End_batch
+
+def Classification_collate_batch(sample): #sample is List
+    input_ids_batch = [s[0] for s in sample]
+    mask_batch = [s[1] for s in sample]
+    token_batch = [s[2] for s in sample]
+    label_batch = [s[3] for s in sample]
+
+    input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
+    mask_batch = pad_sequence(mask_batch, batch_first=True)
+    token_batch = pad_sequence(token_batch, batch_first=True)
+    #label_batch = pad_sequence(label_batch, batch_first=True)
+    label_batch = torch.tensor(label_batch, dtype=torch.float)
+
+    return input_ids_batch, mask_batch, token_batch, label_batch
+
+def Pairwise_collate_batch(sample): #sample is List
+    input_ids_batch = [s[0] for s in sample]
+    mask_batch = [s[1] for s in sample]
+    token_batch = [s[2] for s in sample]
+    label_batch = [s[3] for s in sample]
+    SEP_index_batch = [s[4] for s in sample]
+
+    input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
+    mask_batch = pad_sequence(mask_batch, batch_first=True)
+    token_batch = pad_sequence(token_batch, batch_first=True)
+    label_batch = torch.tensor(label_batch, dtype=torch.float)
+
+    return input_ids_batch, mask_batch, token_batch, label_batch, SEP_index_batch
 
 #get dataloader
 def get_MNLI_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_utils.collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_RTE_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_utils.collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_CoLA_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_utils.collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
 
 def get_Sentiment_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_utils.collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
 
 def get_SQuAD_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=QA_utils.collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=QA_collate_batch)
+
+get_loader_dict = {
+                    'CoLA': get_CoLA_dataloader, 
+                    'Sentiment' : get_Sentiment_dataloader, 
+                    'MNLI' : get_MNLI_dataloader,
+                    'RTE' : get_RTE_dataloader,
+                    'SQuAD' : get_SQuAD_dataloader }
+
+def get_dataloader(dataset, dataset_name, batch_size):
+    dataset = get_loader_dict[dataset_name](dataset, batch_size)
+    return dataset
+
+class DataBox():
+    def __init__(
+    self,
+    bert_kernel_model : BertModel,
+    df_Data : DataFrame,
+    test_size : int, 
+    tokenizer : BertTokenizer,
+    label_nums : int,
+    batch_size : int,
+    dataset_name : str
+    ):
+        df_train, df_test = train_test_split(df_Data, test_size=test_size, random_state=42, shuffle=True)
+        self.df_train = df_train.reset_index(drop=True)
+        self.df_test = df_test.reset_index(drop=True)
+        self.label_nums = label_nums
+
+        self.embedding_layer = get_bert_element(bertmodel=bert_kernel_model).get_copy_embeddings_layer()
+
+        self.training_dataset = get_dataset_dict[dataset_name](self.df_train, tokenizer, label_nums)
+        self.training_dataloader = get_loader_dict[dataset_name](self.training_dataset, batch_size)
+
+        self.test_dataset = get_dataset_dict[dataset_name](self.df_test, tokenizer, label_nums)
+        self.test_dataloader = get_loader_dict[dataset_name](self.test_dataset, batch_size)
+
+        self.name = dataset_name
+
+        self.H = {
+        "train_loss": [],
+        "train_acc": [],
+        "test_loss":[],
+        "test_acc": []
+        }
+    
+class Classification_dataset(Dataset):
+    def __init__(self, df, tokenizer, num_labels):
+        self.df = df
+        self.tokenizer = tokenizer
+        self.num_labels = num_labels
+    
+    def __getitem__(self, index):
+        df = self.df
+        EC = self.tokenizer.encode_plus(df['context'][index])
+        
+        input_ids = torch.tensor(EC['input_ids'])
+        mask = torch.tensor(EC['attention_mask'])
+        token = torch.tensor(EC['token_type_ids'])
+        label = [0.] * self.num_labels
+        label[df['label'][index]] = 1.
+
+        return input_ids, mask, token, label
+    
+    def __len__(self):
+        return len(self.df)
+    
+class Pairwise_dataset(Dataset):
+    def __init__(self, df, tokenizer, num_labels):
+        self.tokenizer = tokenizer
+        self.num_labels = num_labels
+        self.df = df
+    
+    def __getitem__(self, index):
+        df = self.df
+        EC = self.tokenizer.encode_plus(df['context1'][index], df['context2'][index])
+        
+        input_ids = torch.tensor(EC['input_ids'])
+        mask = torch.tensor(EC['attention_mask'])
+        token = torch.tensor(EC['token_type_ids'])
+        label = [0.] * self.num_labels
+        label[df['label'][index]] = 1.
+
+        return input_ids, mask, token, label, df['SEP_ind'][index]
+    
+    def __len__(self):
+        return len(self.df)
+
+class QAdataset(Dataset):
+    def __init__(self, df, tokenizer):
+        self.tokenizer = tokenizer
+        self.df = df
+    
+    def __getitem__(self, index):
+        df = self.df
+        EC = self.tokenizer.encode_plus(df['context'][index], df['question'][index])
+        
+        input_ids = torch.tensor(EC['input_ids'])
+        mask = torch.tensor(EC['attention_mask'])
+        token = torch.tensor(EC['token_type_ids'])
+
+        return input_ids, mask, token, df['TKstart'][index], df['TKend'][index], df['SEP_ind'][index]
+    
+    def __len__(self):
+        return len(self.df)
+    
