@@ -122,16 +122,32 @@ def get_RTE_df(file_path, tokenizer, data_size = 0):
     return train_df
 
 def get_CoLA_df(file_path, tokenizer = None, data_size = 0):
+    # train_df = pd.read_csv(file_path)
+    # if(data_size != 0):
+    #     train_df = train_df[0:data_size]
+    # #print(train_df)
+    # balanced_df = get_balanced_df(train_df, 'label')
+    # if 'Unnamed: 0' in train_df.keys():
+    #     balanced_df = balanced_df.drop('Unnamed: 0', axis=1)
+    # #print(balanced_df)
+
+    # train_df = balanced_df
+    # return train_df
+
     train_df = pd.read_csv(file_path)
     if(data_size != 0):
         train_df = train_df[0:data_size]
-    #print(train_df)
-    balanced_df = get_balanced_df(train_df, 'label')
-    if 'Unnamed: 0' in train_df.keys():
-        balanced_df = balanced_df.drop('Unnamed: 0', axis=1)
-    #print(balanced_df)
 
+    balanced_df = get_balanced_df(train_df, column_name='label')
+    balanced_df = balanced_df.reset_index(drop=True)
     train_df = balanced_df
+    
+    if 'Unnamed: 0' in train_df.keys():
+        train_df = train_df.drop('Unnamed: 0', axis=1)
+
+    train_df['SEP_ind'] = train_df['context1'].apply(lambda x : len(tokenizer.tokenize(x))+1) # +1 is [CLS]
+    train_df['context2'] = train_df['context2'].apply(lambda x : x if type(x) is str else '')
+
     return train_df
 
 def get_Sentiment_df(file_path, tokenizer = None, data_size = 0):
@@ -139,15 +155,21 @@ def get_Sentiment_df(file_path, tokenizer = None, data_size = 0):
     if(data_size != 0):
         train_df = train_df[0:data_size]
 
-    balanced_df = get_balanced_df(train_df, 'label')
-    if 'Unnamed: 0' in train_df.keys():
-        balanced_df = balanced_df.drop('Unnamed: 0', axis=1)
+    balanced_df = get_balanced_df(train_df, column_name='label')
+    balanced_df = balanced_df.reset_index(drop=True)
     train_df = balanced_df
+    
+    if 'Unnamed: 0' in train_df.keys():
+        train_df = train_df.drop('Unnamed: 0', axis=1)
 
-    train_df['label_name'] = train_df['label']
+    train_df['label_name'] = train_df['label']    
     train_df['label'] = train_df['label_name'].replace({'Extremely Positive':0, 'Positive':1, 'Neutral':2, 'Negative':3, 'Extremely Negative':4})
 
+    train_df['SEP_ind'] = train_df['context1'].apply(lambda x : len(tokenizer.tokenize(x))+1) # +1 is [CLS]
+    train_df['context2'] = train_df['context2'].apply(lambda x : x if type(x) is str else '')
+
     return train_df
+
 
 def get_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     #處理好 dataframe
@@ -203,10 +225,10 @@ def get_RTE_dataset(df_RTE, tokenizer, num_labels):
     return Pairwise_dataset(df_RTE, tokenizer, num_labels)
 
 def get_CoLA_dataset(df_CoLA, tokenizer, num_labels):
-    return Classification_dataset(df_CoLA, tokenizer, num_labels)
+    return Pairwise_dataset(df_CoLA, tokenizer, num_labels)
 
 def get_Sentiment_dataset(df_Sentiment, tokenizer, num_labels):
-    return Classification_dataset(df_Sentiment, tokenizer, num_labels)
+    return Pairwise_dataset(df_Sentiment, tokenizer, num_labels)
 
 def get_SQuAD_dataset(df_SQuAD, tokenizer, num_labels = None): #num_labels hasn't use but for formalize
     return QAdataset(df_SQuAD, tokenizer=tokenizer)
@@ -273,10 +295,10 @@ def get_RTE_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_CoLA_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_Sentiment_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_SQuAD_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=QA_collate_batch)
