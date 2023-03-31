@@ -40,22 +40,21 @@ class Bert_classification(torch.nn.Module):
         input_ids : torch.tensor, 
         attention_mask : torch.tensor, 
         token : torch.tensor, 
-        label : torch.tensor
-        ) -> Tuple[torch.tensor]: #return loss and probability 
+        label : torch.tensor, 
+        SEPind : List 
+        ) -> Tuple[torch.tensor]: #loss and probability
 
         embedding_output = self.embedding_layer(input_ids=input_ids, token_type_ids=token)
         outputs = self.model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
     
-        # last hidden layer
         last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
 
-        for_cls = last_hidden_layer[:,0:1,:]
-        cls_output = torch.squeeze(for_cls, dim=1)
-        cls_output = self.dropout(cls_output)
-        logits = self.classifier(cls_output)
-        
-        # pooler_output = outputs.pooler_output
-        # logits = self.classifier(pooler_output)
+        # sep_list = [last_hidden_layer[i,SEPind[i], :] for i in range(len(SEPind))]
+        sep_list = [last_hidden_layer[i,1, :] for i in range(len(SEPind))]
+        for_sep = torch.stack(sep_list)
+
+        sep_output = self.dropout(for_sep)
+        logits = self.classifier(sep_output)
 
         loss = self.loss_function(logits, label)
         prob = self.softmax(logits)

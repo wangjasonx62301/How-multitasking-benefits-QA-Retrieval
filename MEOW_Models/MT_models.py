@@ -61,7 +61,7 @@ class MEOW_MTM:
                    end_pos : List = None,
                    ):
         if(task_type == 'Classification'):
-            return self.forward_dict[dataset_name](input_ids, mask, token_type_ids, label)
+            return self.forward_dict[dataset_name](input_ids, mask, token_type_ids, label, SEPind)
         elif(task_type == 'Pairwise'):
             return self.forward_dict[dataset_name](input_ids, mask, token_type_ids, label, SEPind)
         else:
@@ -107,12 +107,12 @@ class MEOW_MTM:
         loss.backward()
         optimizer.step()
     
-    def CoLA_forward(self, input_ids, mask, token_type_ids, label):
-        loss, prob = self.CoLA_model(input_ids, mask, token_type_ids, label=label)
+    def CoLA_forward(self, input_ids, mask, token_type_ids, label, SEPind):
+        loss, prob = self.CoLA_model(input_ids, mask, token_type_ids, label, SEPind)
         return loss, prob
     
-    def Sentiment_forward(self, input_ids, mask, token_type_ids, label):
-        loss, prob = self.Sentiment_model(input_ids, mask, token_type_ids, label=label)
+    def Sentiment_forward(self, input_ids, mask, token_type_ids, label, SEPind):
+        loss, prob = self.Sentiment_model(input_ids, mask, token_type_ids, label, SEPind)
         return loss, prob
     
     def MNLI_forward(self, input_ids, mask, token_type_ids, label, SEPind):

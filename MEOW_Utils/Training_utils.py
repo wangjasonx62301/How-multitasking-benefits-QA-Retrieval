@@ -100,7 +100,7 @@ def Classifiaction_training(MEOW_model : MEOW_MTM,
                             dataset_name,
                             do_optimize = False
                             ):
-        input_ids, mask, token, label = next(iter)
+        input_ids, mask, token, label, SEPind = next(iter)
         
         input_ids = input_ids.to(device)
         mask = mask.to(device)
@@ -112,7 +112,9 @@ def Classifiaction_training(MEOW_model : MEOW_MTM,
                                            input_ids = input_ids,
                                            mask = mask,
                                            token_type_ids = token,
-                                           label = label)
+                                           label = label,
+                                           SEPind = SEPind
+                                           )
         
         acur = count_correct_num(prob, label)
         if do_optimize:
