@@ -264,14 +264,14 @@ def Classification_collate_batch(sample): #sample is List
     mask_batch = [s[1] for s in sample]
     token_batch = [s[2] for s in sample]
     label_batch = [s[3] for s in sample]
+    SEP_index_batch = [s[4] for s in sample]
 
     input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
     mask_batch = pad_sequence(mask_batch, batch_first=True)
     token_batch = pad_sequence(token_batch, batch_first=True)
-    #label_batch = pad_sequence(label_batch, batch_first=True)
     label_batch = torch.tensor(label_batch, dtype=torch.float)
 
-    return input_ids_batch, mask_batch, token_batch, label_batch
+    return input_ids_batch, mask_batch, token_batch, label_batch, SEP_index_batch
 
 def Pairwise_collate_batch(sample): #sample is List
     input_ids_batch = [s[0] for s in sample]
@@ -295,10 +295,10 @@ def get_RTE_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
 
 def get_CoLA_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
 
 def get_Sentiment_dataloader(dataset, batch_size):
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Pairwise_collate_batch)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
 
 def get_SQuAD_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=QA_collate_batch)
@@ -355,7 +355,7 @@ class Classification_dataset(Dataset):
     
     def __getitem__(self, index):
         df = self.df
-        EC = self.tokenizer.encode_plus(df['context'][index])
+        EC = self.tokenizer.encode_plus(df['context1'][index], df['context2'][index])
         
         input_ids = torch.tensor(EC['input_ids'])
         mask = torch.tensor(EC['attention_mask'])
@@ -363,7 +363,7 @@ class Classification_dataset(Dataset):
         label = [0.] * self.num_labels
         label[df['label'][index]] = 1.
 
-        return input_ids, mask, token, label
+        return input_ids, mask, token, label, df['SEP_ind'][index]
     
     def __len__(self):
         return len(self.df)
