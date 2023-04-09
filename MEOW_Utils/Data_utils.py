@@ -170,11 +170,12 @@ def get_Sentiment_df(file_path, tokenizer = None, data_size = 0):
 
     return train_df
 
-
 def get_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     #處理好 dataframe
     df_train = pd.read_csv(file_path)
     if(data_size != 0):
+        # df_train = df_train.sample(data_size)
+        # df_train = df_train.reset_index(drop=True)
         df_train = df_train[0:data_size]
 
     # question,context
@@ -187,7 +188,8 @@ def get_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     df_train = df_train.reset_index(drop=True)
     
     df_train['answer_start'] = df_train['answer_start'].apply(lambda x : -1 if np.isnan(x) else int(x))
-    df_train['text'] = df_train['text'].apply(lambda x : x if type(x) is str else '')
+    df_train['text'] = df_train['text'].apply(lambda x : x.lower() if type(x) is str else "")
+    df_train['label'] = df_train['answer_start'].apply(lambda x : 0 if x == -1 else 1)
 
     df_train['TKstart'] = pd.Series([0] * len(df_train))
     df_train['TKend'] = pd.Series([0] * len(df_train))
@@ -195,8 +197,8 @@ def get_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     for i in range(len(df_train)):
         df_train['TKstart'][i], df_train['TKend'][i] = count_the_TKbeg_and_TKend(df_train.iloc[i]['context'], df_train.iloc[i]['answer_start'], df_train.iloc[i]['text'], tokenizer)
 
-    if ('index' in df_train.keys()):
-        df_train = df_train.drop('index', axis=1)
+    # if ('index' in df_train.keys()):
+    #     df_train = df_train.drop('index', axis=1)
     if ('c_id' in df_train.keys()):
         df_train = df_train.drop('c_id', axis=1)
     if 'Unnamed: 0' in df_train.keys():
@@ -231,7 +233,7 @@ def get_Sentiment_dataset(df_Sentiment, tokenizer, num_labels):
     return Pairwise_dataset(df_Sentiment, tokenizer, num_labels)
 
 def get_SQuAD_dataset(df_SQuAD, tokenizer, num_labels = None): #num_labels hasn't use but for formalize
-    return QAdataset(df_SQuAD, tokenizer=tokenizer)
+    return QAdataset(df_SQuAD, tokenizer=tokenizer, num_labels=num_labels)
 
 get_dataset_dict = {
                     'CoLA': get_CoLA_dataset, 
@@ -249,15 +251,17 @@ def QA_collate_batch(sample): #sample is List
     input_ids_batch = [s[0] for s in sample]
     mask_batch = [s[1] for s in sample]
     token_batch = [s[2] for s in sample]
-    Start_batch = [s[3] for s in sample]
-    End_batch = [s[4] for s in sample]
-    SEP_index_batch = [s[5] for s in sample]
+    label_batch = [s[3] for s in sample]
+    SEP_index_batch = [s[4] for s in sample]
+    Start_batch = [s[5] for s in sample]
+    End_batch = [s[6] for s in sample]
 
     input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
     mask_batch = pad_sequence(mask_batch, batch_first=True)
     token_batch = pad_sequence(token_batch, batch_first=True)
+    label_batch = torch.tensor(label_batch, dtype=torch.float)
 
-    return input_ids_batch, mask_batch, token_batch, SEP_index_batch, Start_batch, End_batch
+    return input_ids_batch, mask_batch, token_batch, label_batch, SEP_index_batch, Start_batch, End_batch
 
 def Classification_collate_batch(sample): #sample is List
     input_ids_batch = [s[0] for s in sample]
@@ -390,8 +394,9 @@ class Pairwise_dataset(Dataset):
         return len(self.df)
 
 class QAdataset(Dataset):
-    def __init__(self, df, tokenizer):
+    def __init__(self, df, tokenizer, num_labels):
         self.tokenizer = tokenizer
+        self.num_labels = num_labels
         self.df = df
     
     def __getitem__(self, index):
@@ -401,8 +406,10 @@ class QAdataset(Dataset):
         input_ids = torch.tensor(EC['input_ids'])
         mask = torch.tensor(EC['attention_mask'])
         token = torch.tensor(EC['token_type_ids'])
+        label = [0.] * self.num_labels
+        label[df['label'][index]] = 1.
 
-        return input_ids, mask, token, df['TKstart'][index], df['TKend'][index], df['SEP_ind'][index]
+        return input_ids, mask, token, label, df['SEP_ind'][index], df['TKstart'][index], df['TKend'][index]
     
     def __len__(self):
         return len(self.df)

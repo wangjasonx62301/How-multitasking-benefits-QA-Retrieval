@@ -3,6 +3,11 @@ import torch
 from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, BertPooler
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 from typing import *
+import random
+from MEOW_Utils.model_utils import Highway_layer, get_retrieve_context_matrix, pading_empty_tensor
+from torch.nn.parameter import Parameter
+from torch.nn.utils.rnn import pack_padded_sequence
+from torch.nn.utils.rnn import pad_packed_sequence
 
 class BertWithoutEmbedding(BertPreTrainedModel):
     
@@ -116,4 +121,41 @@ class BertWithoutEmbedding(BertPreTrainedModel):
             attentions=encoder_outputs.attentions,
             cross_attentions=encoder_outputs.cross_attentions,
         )
-    
+
+class Modeling(torch.nn.Module):  # LSTM + Highway_layer
+    def __init__(
+        self, 
+        hid_size,
+        device
+        ):
+        super(Modeling, self).__init__()
+        
+        self.device = device
+        self.highway_layer = Highway_layer()
+        self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=1, batch_first=True)
+
+    def forward(
+        self,
+        SEPind : List,
+        outputs : BaseModelOutputWithPoolingAndCrossAttentions # this is the output of BertWithoutEmbedding
+        ) -> Tuple[torch.Tensor]: # return loss only
+        
+        last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
+        
+        # we only need the context's last hidden layer, so dot a mtx that shape is same to last_hidden_layer but the context's section is 1 and other is 0
+        mtx = get_retrieve_context_matrix(SEPind, last_hidden_layer.size(1), last_hidden_layer.size(2))
+        mtx = mtx.to(self.device)
+
+        context_LHL = last_hidden_layer * mtx   #context's last hidden layer,  (batch_size, sequence_length, hidden_size:768)
+        context_LHL = self.highway_layer(context_LHL)
+        
+        # 錯誤寫法
+        # context_LHL = [last_hidden_layer[i][0:SEPind[i]] for i in range(BATCH_SIZE)] # 現在是一個tensor的list
+        
+        context_PACk = pading_empty_tensor(context_LHL) # (batch_size, context_padding_length, 768)
+        
+        output, (hn,cn) = self.LSTM(context_PACk)
+        output, input_sizes = pad_packed_sequence(output, batch_first=True) # output is (batch_size, context_padding_length, 768)
+        
+        return output
+

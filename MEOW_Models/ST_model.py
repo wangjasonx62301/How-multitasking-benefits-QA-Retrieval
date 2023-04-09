@@ -5,12 +5,13 @@ import torch
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
 
-from MEOW_Models.Kernel_model import BertWithoutEmbedding
+from MEOW_Models.Kernel_model import BertWithoutEmbedding, Modeling
 from typing import*
 
 from transformers.models.bert.modeling_bert import BertEmbeddings
-from MEOW_Utils.QAmodel_utils import get_retrieve_context_matrix, pading_empty_tensor
-
+from MEOW_Utils.model_utils import get_retrieve_context_matrix, pading_empty_tensor, Highway_layer, CLS_pooler_layer
+from torch.nn.parameter import Parameter
+import random
 
 ## one sequence claassification 是由 [CLS] 的 contextualize embedding 完之結果再進行 classifier
 
@@ -117,23 +118,38 @@ class Bert_pairwise(torch.nn.Module):
 ## 仍可修改 , LSTM 理想狀態是兩層
 
 class Bert_QA(torch.nn.Module):
+    def get_1d_init_tensor(self,m):
+        w = [0] * m
+        for i in range(m):
+            w[i] = random.uniform(-0.8, 0.8)
+        w = torch.tensor(w, requires_grad=True)
+        return w
+
     def __init__(
         self,
-        model : BertWithoutEmbedding,
+        kernel_model : BertWithoutEmbedding,
         embedding_layer : BertEmbeddings,
+        num_labels : int,
         device
         ):
         super(Bert_QA, self).__init__()
         
         self.device = device
-        self.model = model  
         self.embedding_layer = embedding_layer
+        self.kernel_model = kernel_model
 
-        self.LSTM = torch.nn.LSTM(input_size=768, hidden_size=768, num_layers=1, batch_first=True)
+        self.hid_size = kernel_model.config.hidden_size
+        self.modeling_layer = Modeling(hid_size = self.hid_size, device=device)
 
-        self.start_clasifier = torch.tensor([1.]*768).to(self.device)
-        self.end_clasifier = torch.tensor([1.]*768).to(self.device)
+        self.start_clasifier = Parameter(self.get_1d_init_tensor(768))
+        self.end_clasifier = Parameter(self.get_1d_init_tensor(768))
+        self.CLS_pooler = CLS_pooler_layer(num_labels=num_labels)
+        self.loss_function_label = torch.nn.CrossEntropyLoss()
 
+        # self.start_clasifier = torch.nn.Linear(hid_size, hid_size)
+        # self.end_clasifier = torch.nn.Linear(hid_size, hid_size)
+
+        
         self.softmax = torch.nn.Softmax(dim=1)
         self.loss_function = torch.nn.CrossEntropyLoss()
         
@@ -141,34 +157,33 @@ class Bert_QA(torch.nn.Module):
         self,
         input_ids : torch.tensor,
         attention_mask : torch.tensor,
-        token : torch.tensor, 
+        token : torch.tensor,
+        label : torch.tensor,
         SEPind : List,
         start_pos : List,
-        end_pos : List
+        end_pos : List,
+        return_start_end_pos : bool = False
         ) -> Tuple[torch.Tensor]: # return loss only
         
         embedding_output = self.embedding_layer(input_ids=input_ids, token_type_ids=token)
-        outputs = self.model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
-        last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
+        bert_output = self.kernel_model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
+        output = self.modeling_layer(SEPind, bert_output)
 
-        total_loss = 0
-        correct_num = 0
-        
-        mtx = get_retrieve_context_matrix(SEPind, last_hidden_layer.size(1), last_hidden_layer.size(2))
-        mtx = mtx.to(self.device)
+        # this CLS output is not the bert output, it has been the modeling layer
+        CLS_list = [output[i,0, :] for i in range(len(SEPind))]
+        CLS_output = torch.stack(CLS_list)
+        logits = self.CLS_pooler(CLS_output)
+        loss_for_label = self.loss_function_label(logits, label)
 
-        context_LHL = last_hidden_layer * mtx   #context's last hidden layer
-        
-        # 錯誤寫法
-        # context_LHL = [last_hidden_layer[i][0:SEPind[i]] for i in range(BATCH_SIZE)] # 現在是一個tensor的list
-        
-        context_PACk = pading_empty_tensor(context_LHL) # (batch_size, context_padding_length, 768)
-        
-        output, (hn,cn) = self.LSTM(context_PACk)
-        output, input_sizes = pad_packed_sequence(output, batch_first=True) # output is (batch_size, context_padding_length, 768)
-        
+        prob = self.softmax(logits)
+
         start_score = (output * self.start_clasifier).sum(dim=2) # (batch_size, context_padding_length)
         end_score = (output * self.end_clasifier).sum(dim=2) # (batch_size, context_padding_length)
+
+        # print(start_score)
+        # print(end_score)
+        # print(start_score.argmax(dim=1))
+        # print(end_score.argmax(dim=1))
     
         this_batch_size = input_ids.size(0)
         start_1hot = torch.zeros(this_batch_size, output.size(1)).to(self.device)
@@ -178,10 +193,14 @@ class Bert_QA(torch.nn.Module):
             start_1hot[i][start_pos[i]] = 1
             end_1hot[i][end_pos[i]] = 1
 
-
         loss_start = self.loss_function(start_score, start_1hot)# (batch_size, context_padding_length)
-        loss_end = self.loss_function(end_score, end_1hot)
+        loss_end = self.loss_function(end_score, end_1hot) + loss_start
         
-        total_loss = loss_start + loss_end
-        return total_loss
+        loss_for_pos = loss_start + loss_end
+        total_loss = loss_for_pos + loss_for_label
+
+        if return_start_end_pos == True:
+            return start_score.argmax(dim=1), end_score.argmax(dim=1)
+        
+        return total_loss, prob
     
