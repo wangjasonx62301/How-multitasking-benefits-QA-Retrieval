@@ -8,15 +8,16 @@ from pandas import DataFrame
 from transformers import BertTokenizer
 from MEOW_Utils.Data_utils import count_the_TKbeg_and_TKend
 from evaluate import load
+import collections 
 
 def plot_diagram(H, epoch_num, has_accuracy=False):
     # tensor to float
     Train_loss = [float(i) for i in H['train_loss']]
-    
+    Test_loss = [float(i) for i in H['test_loss']]
+
     if has_accuracy:
         Train_acur = [float(i) for i in H['train_acc']]
-    Test_loss = [float(i) for i in H['test_loss']]
-    Test_acur = [float(i) for i in H['test_acc']]
+        Test_acur = [float(i) for i in H['test_acc']]
 
     # loss
     plt.figure()
@@ -49,9 +50,12 @@ def QA_running(MEOW_model : MEOW_MTM,
                 iter,
                 device,
                 dataset_name,
-                do_optimize = False
+                do_optimize = False,
+                return_toks = False
                 ):
         input_ids, mask, token, label, SEPind, Start_pos, End_pos = next(iter)
+
+        orgdevice = input_ids.device
 
         input_ids = input_ids.to(device)
         mask = mask.to(device)
@@ -63,42 +67,24 @@ def QA_running(MEOW_model : MEOW_MTM,
                                             input_ids = input_ids, 
                                             mask = mask, 
                                             token_type_ids = token,
+                                            SEPind = SEPind,
                                             label=label,
-                                            SEPind = SEPind, 
                                             start_pos = Start_pos,
-                                            end_pos = End_pos)
+                                            end_pos = End_pos,
+                                            return_toks = return_toks)
         
-        if do_optimize:
-            MEOW_model.mt_optimize(loss=loss, dataset_name=dataset_name)
-        
-        return loss, prob
-
-def Pairwise_running(MEOW_model : MEOW_MTM, 
-                      iter,
-                      device,
-                      dataset_name,
-                      do_optimize = False
-                      ):
-        input_ids, mask, token, label, SEPind = next(iter)
-
-        input_ids = input_ids.to(device)
-        mask = mask.to(device)
-        token = token.to(device)
-        label = label.to(device)
-        
-        loss, prob = MEOW_model.mt_forward(task_type='Pairwise',
-                                           dataset_name = dataset_name,
-                                           input_ids = input_ids,
-                                           mask = mask,
-                                           token_type_ids = token, 
-                                           label = label,
-                                           SEPind = SEPind)
-        
-        acur = count_correct_num(prob, label)
+        correct_num = count_correct_num(prob, label)
         if do_optimize:
             MEOW_model.mt_optimize(loss=loss, dataset_name=dataset_name)
 
-        return loss, prob, acur
+        # to provent the cuda from out of memory
+        # use to orgdevice to releace the memory allocated to tensor
+        input_ids = input_ids.to(orgdevice)
+        mask = mask.to(orgdevice)
+        token = token.to(orgdevice)
+        label = label.to(orgdevice)
+        
+        return loss, prob, correct_num
 
 def Classifiaction_running(MEOW_model : MEOW_MTM, 
                             iter,
@@ -107,6 +93,8 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
                             do_optimize = False
                             ):
         input_ids, mask, token, label, SEPind = next(iter)
+
+        orgdevice = input_ids.device
         
         input_ids = input_ids.to(device)
         mask = mask.to(device)
@@ -118,45 +106,30 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
                                            input_ids = input_ids,
                                            mask = mask,
                                            token_type_ids = token,
-                                           label = label,
-                                           SEPind = SEPind
+                                           SEPind = SEPind,
+                                           label = label
                                            )
         
-        acur = count_correct_num(prob, label)
+        correct = count_correct_num(prob, label)
         if do_optimize:
             MEOW_model.mt_optimize(loss=loss, dataset_name=dataset_name)
+
+
+        # to provent the cuda from out of memory
+        # use to orgdevice to releace the memory allocated to tensor
+        input_ids = input_ids.to(orgdevice)
+        mask = mask.to(orgdevice)
+        token = token.to(orgdevice)
+        label = label.to(orgdevice)
         
-        return loss, prob, acur
-
-running_dict = {'CoLA' : Classifiaction_running,
-                 'Sentiment' : Classifiaction_running,
-                 'MNLI' : Pairwise_running,
-                 'RTE' : Pairwise_running,
-                 'SQuAD' : QA_running }
-
-def Training(MEOW_model : MEOW_MTM, 
-             iter,
-             device, 
-             dataset_name,
-             ):
-    return running_dict[dataset_name](MEOW_model, iter, device, dataset_name, do_optimize = True)
-
-def Test(MEOW_model : MEOW_MTM, 
-             iter,
-             device, 
-             dataset_name,
-             ):
-    return running_dict[dataset_name](MEOW_model, iter, device, dataset_name, do_optimize = False)
+        return loss, prob, correct
 
 def count_F1_score(MEOW_model : MEOW_MTM, 
                    df : DataFrame, 
                    tokenizer : BertTokenizer,
                    device):
     
-    squad_metric = load("squad_v2")
-
-    prediction = []
-    reference = []
+    score = 0
 
     for i in range(len(df)):
         EC = tokenizer.encode_plus(df['context'][i], df['question'][i])
@@ -181,32 +154,39 @@ def count_F1_score(MEOW_model : MEOW_MTM,
         Start_pos = [Start_pos]
         End_pos = [End_pos]
 
-        start, end = MEOW_model.SQuAD_forward(input_ids=input_ids, 
+        toks = MEOW_model.SQuAD_forward(input_ids=input_ids, 
                                             mask=mask, 
                                             token_type_ids=token,
-                                            label=label,
                                             SEPind=SEPind,
+                                            label=label,
                                             start_pos=Start_pos, 
                                             end_pos=End_pos,
-                                            return_start_end_pos=True)
-        
-        context = tokenizer.convert_ids_to_tokens(input_ids[0])
-        str_pred = tokenizer.convert_tokens_to_string(context[start[0]:end[0]+1])
-
-        NA_prob = 0.
-        if(str_pred == ""):
-            NA_prob = 1.
-
-        # squad_v2_metric = load("squad_v2")
-        # predictions = [{'prediction_text': '1976', 'id': '56e10a3be3433e1400422b22', 'no_answer_probability': 0.}]
-        # references = [{'answers': {'answer_start': [97], 'text': ['1976']}, 'id': '56e10a3be3433e1400422b22'}]
-
-        print(str_pred)
-        print(df['text'][i])
-
-        prediction.append({'prediction_text': str_pred, 'id': df['index'][i], 'no_answer_probability': NA_prob})
-        reference.append({'id': df['index'][i], 'answers': {'answer_start': [df['answer_start'][i]], 'text': df['text'][i]}})
-
+                                            return_toks=True)
     
-    results = squad_metric.compute(predictions=prediction, references=reference)
-    return results['f1']
+
+        ans_toks = tokenizer.tokenize(df['text'][i])
+        print(ans_toks)
+
+        pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
+        print(pred_toks)
+        print('')
+
+        score += compute_f1(ans_toks, pred_toks)
+
+    print(score / len(df))
+    print('')
+    return 0
+
+def compute_f1(targ_toks : list, pred_toks : list):    
+    common = collections.Counter(targ_toks) & collections.Counter(pred_toks)
+    num_same = sum(common.values())
+    if len(targ_toks) == 0 or len(pred_toks) == 0:
+        # If either is no-answer, then F1 is 1 if they agree, 0 otherwise
+        return int(targ_toks == pred_toks)
+    if num_same == 0:
+        return 0
+    precision = 1.0 * num_same / len(pred_toks)
+    recall = 1.0 * num_same / len(targ_toks)
+    f1 = (2 * precision * recall) / (precision + recall)
+    return f1
+

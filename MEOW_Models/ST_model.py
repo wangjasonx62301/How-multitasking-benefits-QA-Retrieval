@@ -1,121 +1,55 @@
-# there are three module for three different task
-# single-seq-classification, pairwise-seq-classification and QA-retrivel
-
 import torch
-from torch.nn.utils.rnn import pack_padded_sequence
-from torch.nn.utils.rnn import pad_packed_sequence
-
-from MEOW_Models.Kernel_model import BertWithoutEmbedding, Modeling
+from MEOW_Models.Kernel_model import BertWithoutEmbedding, ModelingQA, ModelingCLF
 from typing import*
 
-from transformers.models.bert.modeling_bert import BertEmbeddings
+from transformers.models.bert.modeling_bert import BertEmbeddings, BertPooler
 from MEOW_Utils.model_utils import get_retrieve_context_matrix, pading_empty_tensor, Highway_layer, CLS_pooler_layer
 from torch.nn.parameter import Parameter
 import random
 
-## one sequence claassification 是由 [CLS] 的 contextualize embedding 完之結果再進行 classifier
-
 class Bert_classification(torch.nn.Module):
     def __init__(
         self,
-        model : BertWithoutEmbedding,
+        kernel_model : BertWithoutEmbedding,
         embedding_layer : BertEmbeddings,
-        device,
-        num_labels : int
+        modeling_layer : ModelingCLF,
+        num_labels : int,
+        device
         ):
         super(Bert_classification, self).__init__()
         
-        self.device = device
-        self.model = model
+        self.kernel_model = kernel_model
         self.embedding_layer = embedding_layer
-        self.dropout = torch.nn.Dropout(p=0.1)
-        self.classifier = torch.nn.Linear(model.config.hidden_size, num_labels)
+        self.modeling_layer = modeling_layer
+
+        self.device = device
+        self.hid_size = kernel_model.config.hidden_size
+
+        self.clf_clasifier = torch.nn.Linear(self.hid_size, num_labels)
         
         self.loss_function = torch.nn.CrossEntropyLoss() #會自己 softmax
         self.softmax = torch.nn.Softmax(dim=1)
-        
-        
+           
     # return 出(batch, seq_len)
     def forward(
         self, 
         input_ids : torch.tensor, 
         attention_mask : torch.tensor, 
-        token : torch.tensor, 
-        label : torch.tensor, 
-        SEPind : List 
+        token : torch.tensor,
+        SEPind : List,
+        label : torch.tensor = None
         ) -> Tuple[torch.tensor]: #loss and probability
 
         embedding_output = self.embedding_layer(input_ids=input_ids, token_type_ids=token)
-        outputs = self.model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
-    
-        last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
+        bert_output = self.kernel_model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids=token)
 
-        # sep_list = [last_hidden_layer[i,SEPind[i], :] for i in range(len(SEPind))]
-        sep_list = [last_hidden_layer[i,1, :] for i in range(len(SEPind))]
-        for_sep = torch.stack(sep_list)
+        output_clf = self.modeling_layer(SEPind, bert_output)  # (batch_size, 768) 
+        clf_score = self.clf_clasifier(output_clf) # (batch_size, 2)
 
-        sep_output = self.dropout(for_sep)
-        logits = self.classifier(sep_output)
-
-        loss = self.loss_function(logits, label)
-        prob = self.softmax(logits)
+        loss = self.loss_function(clf_score, label)
+        prob = self.softmax(clf_score)
         
         return loss, prob
-    
-## pairwise 是由 [CLS] 的 contextualize embedding 完之結果再進行 classifier
-## 有想過改成 [SEP] 的 contextualize embedding 
-## 不過因 [SEP] 在每個 train dataset 都是不同位置，不確定效能是否會變差
-
-class Bert_pairwise(torch.nn.Module):
-    def __init__(
-        self,
-        model : BertWithoutEmbedding,
-        embedding_layer : BertEmbeddings,
-        device,
-        num_labels : int
-        ):
-        super(Bert_pairwise, self).__init__()
-        
-        self.device = device
-        self.model = model
-        self.embedding_layer = embedding_layer
-        self.dropout = torch.nn.Dropout(p=0.1)
-        self.classifier = torch.nn.Linear(model.config.hidden_size, num_labels)
-        
-        self.loss_function = torch.nn.CrossEntropyLoss() #會自己 softmax
-        self.softmax = torch.nn.Softmax(dim=1)
-        
-        
-    # return 出(batch, seq_len)
-    def forward(
-        self, 
-        input_ids : torch.tensor, 
-        attention_mask : torch.tensor, 
-        token : torch.tensor, 
-        label : torch.tensor, 
-        SEPind : List 
-        ) -> Tuple[torch.tensor]: #loss and probability
-
-        embedding_output = self.embedding_layer(input_ids=input_ids, token_type_ids=token)
-        outputs = self.model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
-    
-        last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
-
-        # sep_list = [last_hidden_layer[i,SEPind[i], :] for i in range(len(SEPind))]
-        sep_list = [last_hidden_layer[i,1, :] for i in range(len(SEPind))]
-        for_sep = torch.stack(sep_list)
-
-        sep_output = self.dropout(for_sep)
-        logits = self.classifier(sep_output)
-
-        loss = self.loss_function(logits, label)
-        prob = self.softmax(logits)
-        
-        return loss, prob
-
-## embedding_layer is the embedding_layer from bert
-## QA 層的輸出是用 context 的 contextualize embedding 完之結果再經過 LSTM
-## 仍可修改 , LSTM 理想狀態是兩層
 
 class Bert_QA(torch.nn.Module):
     def get_1d_init_tensor(self,m):
@@ -129,28 +63,30 @@ class Bert_QA(torch.nn.Module):
         self,
         kernel_model : BertWithoutEmbedding,
         embedding_layer : BertEmbeddings,
+        modeling_layer_for_clf : ModelingCLF,
+        modeling_layer_for_qa : ModelingQA,
         num_labels : int,
         device
         ):
         super(Bert_QA, self).__init__()
-        
-        self.device = device
+
         self.embedding_layer = embedding_layer
         self.kernel_model = kernel_model
-
+        self.modeling_layer_clf = modeling_layer_for_clf
+        self.modeling_layer_qa = modeling_layer_for_qa
+      
+        self.device = device
         self.hid_size = kernel_model.config.hidden_size
-        self.modeling_layer = Modeling(hid_size = self.hid_size, device=device)
 
         self.start_clasifier = Parameter(self.get_1d_init_tensor(768))
         self.end_clasifier = Parameter(self.get_1d_init_tensor(768))
-        self.CLS_pooler = CLS_pooler_layer(num_labels=num_labels)
-        self.loss_function_label = torch.nn.CrossEntropyLoss()
+        self.clf_clasifier = torch.nn.Linear(self.hid_size, 2)
 
         # self.start_clasifier = torch.nn.Linear(hid_size, hid_size)
         # self.end_clasifier = torch.nn.Linear(hid_size, hid_size)
 
-        
         self.softmax = torch.nn.Softmax(dim=1)
+        self.loss_function_label = torch.nn.CrossEntropyLoss()
         self.loss_function = torch.nn.CrossEntropyLoss()
         
     def forward(
@@ -158,49 +94,92 @@ class Bert_QA(torch.nn.Module):
         input_ids : torch.tensor,
         attention_mask : torch.tensor,
         token : torch.tensor,
-        label : torch.tensor,
         SEPind : List,
-        start_pos : List,
-        end_pos : List,
-        return_start_end_pos : bool = False
-        ) -> Tuple[torch.Tensor]: # return loss only
+        label : torch.tensor = None, # reference dont need
+        start_pos : List = None,  # reference dont need
+        end_pos : List = None, # reference dont need
+        return_toks : bool = False
+        ) -> Tuple[torch.Tensor]:
         
+        ####-----------------------------------------------------------------------------
+        # this is the embedding output, the QA has answer and no answer use the same embedding layer
+        # but they use the different modeling layer
+        # the embedding layer is depended on which dataset you are
+        # but the modeling layer is which task
+        ####-----------------------------------------------------------------------------
+
+
+        #### THE ENTIRE MODEL RUN AND OUTPUT --------------------------------------------
+        ####-----------------------------------------------------------------------------
         embedding_output = self.embedding_layer(input_ids=input_ids, token_type_ids=token)
         bert_output = self.kernel_model(embedding_output=embedding_output, input_ids=input_ids, attention_mask=attention_mask, token_type_ids = token)
-        output = self.modeling_layer(SEPind, bert_output)
 
-        # this CLS output is not the bert output, it has been the modeling layer
-        CLS_list = [output[i,0, :] for i in range(len(SEPind))]
-        CLS_output = torch.stack(CLS_list)
-        logits = self.CLS_pooler(CLS_output)
-        loss_for_label = self.loss_function_label(logits, label)
+        output_clf = self.modeling_layer_clf(SEPind, bert_output)  # (batch_size, 768)
+        output_qa = self.modeling_layer_qa(SEPind, bert_output) # (batch_size, context_length, 768)
+        ####-----------------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
 
-        prob = self.softmax(logits)
 
-        start_score = (output * self.start_clasifier).sum(dim=2) # (batch_size, context_padding_length)
-        end_score = (output * self.end_clasifier).sum(dim=2) # (batch_size, context_padding_length)
+        #### COUNT THE PROBABILITY OF IT HAS ANSWER OR NOT ------------------------------
+        ####-----------------------------------------------------------------------------
+        # CLS_list = [bert_output[i,0, :] for i in range(len(SEPind))]
+        # CLS_output = torch.stack(CLS_list)
+        clf_score = self.clf_clasifier(output_clf) # (batch_size, 2)
+        ####-----------------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
+ 
 
-        # print(start_score)
-        # print(end_score)
-        # print(start_score.argmax(dim=1))
-        # print(end_score.argmax(dim=1))
-    
-        this_batch_size = input_ids.size(0)
-        start_1hot = torch.zeros(this_batch_size, output.size(1)).to(self.device)
-        end_1hot = torch.zeros(this_batch_size, output.size(1)).to(self.device)
+        #### COUNT THE START AND END ----------------------------------------------------
+        ####-----------------------------------------------------------------------------
+        start_score = (output_qa * self.start_clasifier).sum(dim=2) # (batch_size, context_length)
+        end_score = (output_qa * self.end_clasifier).sum(dim=2) # (batch_size, context_length)
+        ####-----------------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
+
+
+        #### ONLY REFERENCE AND DON'T NEED LOSS -----------------------------------------
+        ####-----------------------------------------------------------------------------
+        if return_toks :
+            start_tok = start_score.argmax(dim=1)
+            end_tok = end_score.argmax(dim=1)
+
+            batch_toks = []
+
+            for i in range (len(input_ids)) :
+                if clf_score[i].argmax() == 0 : # predict it has no answer
+                    batch_toks.append([])
+                else :
+                    batch_toks.append(input_ids[i, start_tok[i]+1 : end_tok[i]+2])  # +1 +2 because of [CLS]    
+
+            return batch_toks
+        ####-----------------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
         
-        for i in range(this_batch_size):
-            start_1hot[i][start_pos[i]] = 1
-            end_1hot[i][end_pos[i]] = 1
 
-        loss_start = self.loss_function(start_score, start_1hot)# (batch_size, context_padding_length)
-        loss_end = self.loss_function(end_score, end_1hot) + loss_start
-        
-        loss_for_pos = loss_start + loss_end
-        total_loss = loss_for_pos + loss_for_label
+        #### NEED LOSS ------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
+        loss_for_label = self.loss_function_label(clf_score, label)
+        prob = self.softmax(clf_score)
 
-        if return_start_end_pos == True:
-            return start_score.argmax(dim=1), end_score.argmax(dim=1)
-        
+        if label[0][1] == 1 :     
+            # this batch data has answer, need the start and end position loss
+
+            this_batch_size = input_ids.size(0)
+            start_1hot = torch.zeros(this_batch_size, output_qa.size(1)).to(self.device)
+            end_1hot = torch.zeros(this_batch_size, output_qa.size(1)).to(self.device)
+
+            # the startpos nedd -1 because of [CLS] is get rid of during the modeling layer
+            for i in range(this_batch_size):
+                start_1hot[i][start_pos[i]-1] = 1 
+                end_1hot[i][end_pos[i]-1] = 1 
+
+            loss_start = self.loss_function(start_score, start_1hot)
+            loss_end = self.loss_function(end_score, end_1hot)
+
+            total_loss =  loss_for_label + (loss_start + loss_end)
+        else :
+            total_loss = loss_for_label
+
         return total_loss, prob
-    
+        ####-----------------------------------------------------------------------------
+        ####-----------------------------------------------------------------------------
