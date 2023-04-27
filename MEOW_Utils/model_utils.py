@@ -3,23 +3,38 @@ import torch
 from typing import *
 import random
 from torch.nn.parameter import Parameter
+from torch.nn.utils.rnn import pad_sequence
 
 def pading_empty_tensor(context_LHL):  #context(QA) last hidden layer, this is padding for lstm because the context length may be difference
     seqlen = [s.size(0) for s in context_LHL]
     data = pack_padded_sequence(context_LHL, seqlen, batch_first=True, enforce_sorted=False)
     return data
 
-def get_retrieve_context_matrix(SEPind:List, seq_len, hidden_layer_size): #last hidden layer
+def get_retrieve_context_matrix(SEPind:List, max_context_len, hidden_layer_size):
+    #### we use this function to retrieve after the highway network
+    #### because in highway network will add some constant tensor
+    #### those tensor is zero array(padding) need to be eliminate to zero
+
     num = len(SEPind)  #通常是 batch size
     
     AOLN = [1] * hidden_layer_size  # a_output_hidden_layer_needed
     AOLD = [0] * hidden_layer_size  # a_output_hidden_DONT_needed
 
-    mtx = [[AOLN]*SEPind[i] + [AOLD]*(seq_len-SEPind[i]) for i in range(num)]
+    ## -1 because of the SEPind is take [CLS] into consideration
+    mtx = [[AOLN]*(SEPind[i]-1) + [AOLD]*(max_context_len-SEPind[i]+1) for i in range(num)]
     mtx = torch.tensor(mtx, requires_grad=False)
     
     return mtx
+
+def get_context_from_LHL(LHL, SEPind:List):
+    batch_size = len(SEPind)
+    context = []
+    for i in range(batch_size):
+        context.append(LHL[i][1:SEPind[i]])
     
+    ret = pad_sequence(context, batch_first=True)
+    return ret
+
 class Highway_layer(torch.nn.Module):
     def get_2d_init_tensor(self,m,n):
         w = torch.empty(m,n, requires_grad=True)
@@ -81,29 +96,3 @@ class CLS_pooler_layer(torch.nn.Module):
         ret = torch.matmul(CLS, self.Wcls) + self.bcls
         ret = torch.sigmoid(ret)
         return ret
-
-
-# class Chi_module(torch.nn.Module):
-#     def __init__(self) -> None:
-#         super(Chi_module, self).__init__()
-#         self.model = Par_module()
-
-
-# h = Chi_module()
-# for pre, module in h._parameters.it:
-#     print(module)
-    
-# a = torch.nn.Linear(4,4)
-# b = torch.nn.Linear(5,5)
-
-# print(a._parameters.items())
-
-# a._parameters.update(b._parameters)
-# print(a._parameters.items())
-
-# a._parameters = a._parameters.items() | b._parameters.items()
-# print(a._parameters.items())
-
-# h = Highway_layer()
-# for name, param in h._named_members(lambda module: module._parameters.items()):
-#     print(name)

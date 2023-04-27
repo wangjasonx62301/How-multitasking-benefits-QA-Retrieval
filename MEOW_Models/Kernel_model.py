@@ -4,7 +4,7 @@ from transformers.models.bert.modeling_bert import BertEmbeddings, BertEncoder, 
 from transformers.modeling_outputs import BaseModelOutputWithPoolingAndCrossAttentions
 from typing import *
 import random
-from MEOW_Utils.model_utils import Highway_layer, get_retrieve_context_matrix, pading_empty_tensor
+from MEOW_Utils.model_utils import Highway_layer, get_retrieve_context_matrix, pading_empty_tensor, get_context_from_LHL
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.nn.utils.rnn import pad_packed_sequence
@@ -17,7 +17,6 @@ class BertWithoutEmbedding(BertPreTrainedModel):
 
         self.embeddings = BertEmbeddings(config)
         self.encoder = BertEncoder(config)
-
         self.pooler = BertPooler(config) if add_pooling_layer else None
 
         # Initialize weights and apply final processing
@@ -108,7 +107,9 @@ class BertWithoutEmbedding(BertPreTrainedModel):
             return_dict=return_dict,
         )
         sequence_output = encoder_outputs[0]
-        pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
+        # pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
+        # we don't use pooler output for kernel model
+        pooled_output = None
 
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
@@ -122,17 +123,18 @@ class BertWithoutEmbedding(BertPreTrainedModel):
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
-class Modeling(torch.nn.Module):  # LSTM + Highway_layer
+class ModelingQA(torch.nn.Module):  # LSTM + Highway_layer
     def __init__(
         self, 
         hid_size,
         device
         ):
-        super(Modeling, self).__init__()
+        super(ModelingQA, self).__init__()
         
         self.device = device
         self.highway_layer = Highway_layer()
-        self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=1, batch_first=True)
+        # self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=1, batch_first=True)
+        self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=2, batch_first=True, dropout = 0.2)
 
     def forward(
         self,
@@ -141,21 +143,58 @@ class Modeling(torch.nn.Module):  # LSTM + Highway_layer
         ) -> Tuple[torch.Tensor]: # return loss only
         
         last_hidden_layer = outputs.last_hidden_state  # (batch_size, sequence_length, hidden_size:768)
-        
-        # we only need the context's last hidden layer, so dot a mtx that shape is same to last_hidden_layer but the context's section is 1 and other is 0
-        mtx = get_retrieve_context_matrix(SEPind, last_hidden_layer.size(1), last_hidden_layer.size(2))
-        mtx = mtx.to(self.device)
+        hidden_size = last_hidden_layer.size(2)
 
-        context_LHL = last_hidden_layer * mtx   #context's last hidden layer,  (batch_size, sequence_length, hidden_size:768)
-        context_LHL = self.highway_layer(context_LHL)
+        context_LHL = get_context_from_LHL(last_hidden_layer, SEPind) # (batch_size, max_context_length, 768)
         
-        # 錯誤寫法
-        # context_LHL = [last_hidden_layer[i][0:SEPind[i]] for i in range(BATCH_SIZE)] # 現在是一個tensor的list
-        
-        context_PACk = pading_empty_tensor(context_LHL) # (batch_size, context_padding_length, 768)
-        
+        #### highway
+        highway_output = self.highway_layer(context_LHL) # (batch_size, max_context_length, 768)
+        mtx = get_retrieve_context_matrix(SEPind, max_context_len = highway_output.size(1), hidden_layer_size = hidden_size)
+        mtx = mtx.to(self.device)
+        highway_output = highway_output * mtx
+
+        #### LSTM
+        context_PACk = pading_empty_tensor(highway_output) # this is an object
         output, (hn,cn) = self.LSTM(context_PACk)
         output, input_sizes = pad_packed_sequence(output, batch_first=True) # output is (batch_size, context_padding_length, 768)
         
         return output
 
+class ModelingCLF(torch.nn.Module):
+    def get_2d_init_tensor(self,m,n):
+        w = torch.empty(m,n, requires_grad=True)
+        w = torch.nn.init.xavier_normal_(w)
+        return w
+
+    def get_1d_init_tensor(self,m):
+        w = [0] * m
+        for i in range(m):
+            w[i] = random.uniform(-0.8, 0.8)
+        w = torch.tensor(w, requires_grad=True)
+        return w
+
+    def __init__(self, pooler, hidden_size, device) -> None:
+        super(ModelingCLF, self).__init__()
+        # self.Wcls = Parameter(self.get_2d_init_tensor(768,num_labels))
+        # self.bcls = Parameter(self.get_1d_init_tensor(num_labels))
+        
+        self.pooler = pooler
+        self.hidden_size = hidden_size
+        self.device = device
+        
+
+    def forward(
+        self,
+        SEPind : List,
+        outputs : BaseModelOutputWithPoolingAndCrossAttentions # this is the output of BertWithoutEmbedding
+        ) -> Tuple[torch.Tensor]: # return loss only
+        
+        LHL = outputs.last_hidden_state
+        pooler_outupt = self.pooler(LHL) # (batch_size, sequence_length, hidden_size:768)
+        
+
+        # cls_output = last_hidden_layer[:,0]
+        # cls_score = torch.matmul(cls_output, self.Wcls)
+        # cls_score = self.activation(cls_score)
+        
+        return pooler_outupt
