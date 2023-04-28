@@ -124,12 +124,13 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
         
         return loss, prob, correct
 
-def count_F1_score(MEOW_model : MEOW_MTM, 
+def count_F1_EM_score(MEOW_model : MEOW_MTM, 
                    df : DataFrame, 
                    tokenizer : BertTokenizer,
                    device):
     
-    score = 0
+    F1_score = 0
+    EM_score = 0
 
     for i in range(len(df)):
         EC = tokenizer.encode_plus(df['context'][i], df['question'][i])
@@ -165,17 +166,17 @@ def count_F1_score(MEOW_model : MEOW_MTM,
     
 
         ans_toks = tokenizer.tokenize(df['text'][i])
-        print(ans_toks)
+        # print(ans_toks)
 
         pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
-        print(pred_toks)
-        print('')
+        # print(pred_toks)
+        # print('')
+        EM_score += compute_exact_match(ans_toks, pred_toks)
+        F1_score += compute_f1(ans_toks, pred_toks)
 
-        score += compute_f1(ans_toks, pred_toks)
+    # print(F1_score / len(df))
 
-    print(score / len(df))
-    print('')
-    return 0
+    return F1_score, EM_score
 
 def compute_f1(targ_toks : list, pred_toks : list):    
     common = collections.Counter(targ_toks) & collections.Counter(pred_toks)
@@ -190,3 +191,9 @@ def compute_f1(targ_toks : list, pred_toks : list):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
+def compute_exact_match(targ_toks : list, pred_toks : list):
+    exact_match_metric = load('exact_match')
+    if len(targ_toks) == len(pred_toks) != 0:
+        return exact_match_metric.compute(predictions=pred_toks, references=targ_toks, ignore_case=True, ignore_punctuation=True)['exact_match']
+    elif len(targ_toks) == len(pred_toks) == 0: return 1
+    else : return 0
