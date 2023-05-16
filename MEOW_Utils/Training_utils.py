@@ -7,38 +7,36 @@ from MEOW_Models.MT_models import MEOW_MTM
 from pandas import DataFrame
 from transformers import BertTokenizer
 from MEOW_Utils.Data_utils import count_the_TKbeg_and_TKend
-from evaluate import load
 import collections 
+from MEOW_Utils.config import*
 
-def plot_diagram(H, epoch_num, has_accuracy=False):
+def plot_diagram(H, epoch_num):
     # tensor to float
     Train_loss = [float(i) for i in H['train_loss']]
     Test_loss = [float(i) for i in H['test_loss']]
 
-    if has_accuracy:
-        Train_acur = [float(i) for i in H['train_acc']]
-        Test_acur = [float(i) for i in H['test_acc']]
+    Train_acur = [float(i) for i in H['train_acc']]
+    Test_acur = [float(i) for i in H['test_acc']]
 
     # loss
     plt.figure()
     plt.title("Loss")
     plt.xlabel("EPOCH")
     plt.ylabel("Loss")
-    plt.plot(Train_loss, label="test_loss")
+    plt.plot(Train_loss, label="train_loss")
     plt.plot(Test_loss, label="test_loss")
     plt.xticks(np.arange(epoch_num), range(1,epoch_num+1,1))
     plt.show()
     
-    if has_accuracy:
-        # accuracy
-        plt.figure()
-        plt.title("Test Accuracy")
-        plt.xlabel("EPOCH")
-        plt.ylabel("Accuracy")
-        plt.plot(Train_acur, label="test_acc")
-        plt.plot(Test_acur, label="test_acc")
-        plt.xticks(np.arange(epoch_num), range(1,epoch_num+1,1))
-        plt.show()
+    # accuracy
+    plt.figure()
+    plt.title("Test Accuracy")
+    plt.xlabel("EPOCH")
+    plt.ylabel("Accuracy")
+    plt.plot(Train_acur, label="train_acc")
+    plt.plot(Test_acur, label="test_acc")
+    plt.xticks(np.arange(epoch_num), range(1,epoch_num+1,1))
+    plt.show()
 
 def count_correct_num(prob : torch.tensor, label : torch.tensor):
     predict = torch.argmax(prob, dim=1)
@@ -49,7 +47,7 @@ def count_correct_num(prob : torch.tensor, label : torch.tensor):
 def QA_running(MEOW_model : MEOW_MTM, 
                 iter,
                 device,
-                dataset_name,
+                dataset_ind,
                 do_optimize = False,
                 return_toks = False
                 ):
@@ -62,8 +60,7 @@ def QA_running(MEOW_model : MEOW_MTM,
         token = token.to(device)
         label = label.to(device)
         
-        loss, prob = MEOW_model.mt_forward(task_type= 'QA', 
-                                            dataset_name = dataset_name,
+        loss, prob = MEOW_model.mt_forward(dataset_ind = dataset_ind,
                                             input_ids = input_ids, 
                                             mask = mask, 
                                             token_type_ids = token,
@@ -75,7 +72,7 @@ def QA_running(MEOW_model : MEOW_MTM,
         
         correct_num = count_correct_num(prob, label)
         if do_optimize:
-            MEOW_model.mt_optimize(loss=loss, dataset_name=dataset_name)
+            MEOW_model.mt_optimize(loss=loss, dataset_ind=dataset_ind)
 
         # to provent the cuda from out of memory
         # use to orgdevice to releace the memory allocated to tensor
@@ -89,7 +86,7 @@ def QA_running(MEOW_model : MEOW_MTM,
 def Classifiaction_running(MEOW_model : MEOW_MTM, 
                             iter,
                             device, 
-                            dataset_name,
+                            dataset_ind,
                             do_optimize = False
                             ):
         input_ids, mask, token, label, SEPind = next(iter)
@@ -101,8 +98,7 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
         token = token.to(device)
         label = label.to(device)
         
-        loss, prob = MEOW_model.mt_forward(task_type = 'Classification',
-                                           dataset_name = dataset_name,
+        loss, prob = MEOW_model.mt_forward(dataset_ind = dataset_ind,
                                            input_ids = input_ids,
                                            mask = mask,
                                            token_type_ids = token,
@@ -112,7 +108,7 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
         
         correct = count_correct_num(prob, label)
         if do_optimize:
-            MEOW_model.mt_optimize(loss=loss, dataset_name=dataset_name)
+            MEOW_model.mt_optimize(loss = loss, dataset_ind = dataset_ind)
 
 
         # to provent the cuda from out of memory
@@ -124,13 +120,12 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
         
         return loss, prob, correct
 
-def count_F1_EM_score(MEOW_model : MEOW_MTM, 
+def count_F1_score(MEOW_model : MEOW_MTM, 
                    df : DataFrame, 
                    tokenizer : BertTokenizer,
                    device):
     
-    F1_score = 0
-    EM_score = 0
+    score = 0
 
     for i in range(len(df)):
         EC = tokenizer.encode_plus(df['context'][i], df['question'][i])
@@ -155,28 +150,28 @@ def count_F1_EM_score(MEOW_model : MEOW_MTM,
         Start_pos = [Start_pos]
         End_pos = [End_pos]
 
-        toks = MEOW_model.SQuAD_forward(input_ids=input_ids, 
-                                            mask=mask, 
-                                            token_type_ids=token,
-                                            SEPind=SEPind,
-                                            label=label,
-                                            start_pos=Start_pos, 
-                                            end_pos=End_pos,
-                                            return_toks=True)
-    
+        toks = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
+                                     input_ids=input_ids,
+                                     mask=mask,
+                                     token_type_ids=token,
+                                     SEPind=SEPind,
+                                     label=label,
+                                     start_pos=Start_pos,
+                                     end_pos=End_pos,
+                                     return_toks=True)
 
         ans_toks = tokenizer.tokenize(df['text'][i])
-        # print(ans_toks)
+        print(ans_toks)
 
         pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
-        # print(pred_toks)
-        # print('')
-        EM_score += compute_exact_match(ans_toks, pred_toks)
-        F1_score += compute_f1(ans_toks, pred_toks)
+        print(pred_toks)
+        print('')
 
-    # print(F1_score / len(df))
+        score += compute_f1(ans_toks, pred_toks)
 
-    return F1_score, EM_score
+    print(score / len(df))
+    print('')
+    return 0
 
 def compute_f1(targ_toks : list, pred_toks : list):    
     common = collections.Counter(targ_toks) & collections.Counter(pred_toks)
@@ -191,9 +186,42 @@ def compute_f1(targ_toks : list, pred_toks : list):
     f1 = (2 * precision * recall) / (precision + recall)
     return f1
 
-def compute_exact_match(targ_toks : list, pred_toks : list):
-    exact_match_metric = load('exact_match')
-    if len(targ_toks) == len(pred_toks) != 0:
-        return exact_match_metric.compute(predictions=pred_toks, references=targ_toks, ignore_case=True, ignore_punctuation=True)['exact_match']
-    elif len(targ_toks) == len(pred_toks) == 0: return 1
-    else : return 0
+class Record:
+    def __init__(self):
+        self.training_loss = 0.0
+        self.training_round_num = 0
+        self.training_correct = 0
+        self.training_data_num = 0
+        
+        self.test_loss = 0.0
+        self.test_round_num = 0
+        self.test_correct = 0
+        self.test_data_num = 0
+    
+    def get_training_accuracy(self):
+        return self.training_correct / self.training_data_num
+
+    def get_training_average_loss(self):
+        return self.training_loss / self.training_round_num
+
+    def get_test_accuracy(self):
+        return self.test_correct / self.test_data_num
+    
+    def get_test_average_loss(self):
+        return self.test_loss / self.test_round_num
+    
+    def add_training_loss(self, loss):
+        self.training_loss += loss
+        self.training_round_num += 1
+    
+    def add_training_acur(self, correct, num):
+        self.training_correct += correct
+        self.training_data_num += num
+
+    def add_test_loss(self, loss):
+        self.test_loss += loss
+        self.test_round_num += 1
+    
+    def add_test_acur(self, correct, num):
+        self.test_correct += correct
+        self.test_data_num += num

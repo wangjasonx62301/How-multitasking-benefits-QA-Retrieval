@@ -76,6 +76,7 @@ class layer_helper():
         self.device = device
         # all classification class is use this modeling_layer_clf for modeling
         self.kernel_model = BertWithoutEmbedding.from_pretrained(pretrained_module_name)
+        self.kernel_model.config.output_hidden_states = True
         self.modeling_layer_qa = ModelingQA(hid_size = self.kernel_model.config.hidden_size, device = self.device)
     
     def get_kernel_model(self):
@@ -178,6 +179,36 @@ def create_SQuAD_df(file_path, tokenizer = None, data_size = 0):
     df_train.to_csv('Dataset_infile\_SQuAD.csv')
     
     return df_train
+
+def create_QNLI_df(file_path, tokenizer = None, data_size = 0):
+    df = pd.read_csv(file_path, index_col=[0])
+    if(data_size != 0):
+        df = df[0:data_size]
+
+    print()
+
+    for i in range(len(df)):
+        print(i)
+        if( len(tokenizer.tokenize(df['question'][i])) + len(tokenizer.tokenize(df['sentence'][i])) >= 510 ):
+            df = df.drop(i, axis=0)
+            i = i-1
+
+    balanced_df = get_balanced_df(df, column_name='label')
+    balanced_df = balanced_df.reset_index(drop=True)
+    df = balanced_df
+
+    df['label_name'] = df['label']
+    df['label'] = df['label_name'].replace({'not_entailment':0, 'entailment':1})
+
+    df['context1'] = df['question']
+    df['context2'] = df['sentence']
+
+    df = df.drop(['sentence','question'], axis=1)
+
+    df['SEP_ind'] = df['context1'].apply(lambda x : len(tokenizer.tokenize(x))+1) # +1 is [CLS]
+    df['context2'] = df['context2'].fillna(' ')
+
+    df.to_csv('Dataset_infile\_QNLI.csv')
 ####------------------------------------------------------------------------
 
 # get dataset
@@ -191,14 +222,17 @@ def get_MNLI_dataset(df_MNLI, tokenizer, num_labels):
 def get_SQuAD_dataset(df_SQuAD, tokenizer, num_labels = None): #num_labels hasn't use but for formalize
     return QAdataset(df_SQuAD, tokenizer=tokenizer, num_labels=num_labels)
 
+def get_QNLI_dataset(df_QNLI, tokenizer, num_labels = None):
+    return Classification_dataset(df_QNLI, tokenizer, num_labels)
+
 get_dataset_dict = {
                     'CoLA': get_CoLA_dataset, 
                     'MNLI' : get_MNLI_dataset, 
-                    'SQuAD' : get_SQuAD_dataset }
+                    'SQuAD' : get_SQuAD_dataset,
+                    'QNLI' : get_QNLI_dataset}
 
-def get_dataset(df, dataset_name, tokenizer = None, num_labels = None):
-    dataset = get_dataset_dict[dataset_name](df, tokenizer, num_labels)
-    return dataset
+def get_dataset(dataset_name, df, tokenizer = None, num_labels = None):
+    return get_dataset_dict[dataset_name](df, tokenizer, num_labels)
 ####------------------------------------------------------------------------
 
 # collate batch function
@@ -246,12 +280,16 @@ def get_MNLI_dataloader(dataset, batch_size):
 def get_SQuAD_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=QA_collate_batch)
 
+def get_QNLI_dataloader(dataset, batch_size):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
+
 get_loader_dict = {
                     'CoLA': get_CoLA_dataloader, 
                     'MNLI' : get_MNLI_dataloader,
-                    'SQuAD' : get_SQuAD_dataloader }
+                    'SQuAD' : get_SQuAD_dataloader,
+                    'QNLI' : get_QNLI_dataloader}
 
-def get_dataloader(dataset, dataset_name, batch_size):
+def get_dataloader(dataset_name, dataset, batch_size):
     dataset = get_loader_dict[dataset_name](dataset, batch_size)
     return dataset
 ####------------------------------------------------------------------------
@@ -260,7 +298,7 @@ class DataBox():
     def __init__(
     self,
     embedding_layer : BertEmbeddings,
-    modeling_layer : ModelingCLF,
+    clfmodeling_layer : ModelingCLF,
     df_Data : DataFrame,
     test_size : int, 
     tokenizer : BertTokenizer,
@@ -274,13 +312,13 @@ class DataBox():
         self.label_nums = label_nums
 
         self.embedding_layer = embedding_layer
-        self.modeling_layer = modeling_layer
+        self.clf_modeling_layer = clfmodeling_layer
 
-        self.training_dataset = get_dataset_dict[dataset_name](self.df_train, tokenizer, label_nums)
-        self.training_dataloader = get_loader_dict[dataset_name](self.training_dataset, batch_size)
+        self.training_dataset = get_dataset(dataset_name, self.df_train, tokenizer, label_nums)
+        self.training_dataloader = get_dataloader(dataset_name, self.training_dataset, batch_size)
 
-        self.test_dataset = get_dataset_dict[dataset_name](self.df_test, tokenizer, label_nums)
-        self.test_dataloader = get_loader_dict[dataset_name](self.test_dataset, batch_size)
+        self.test_dataset = get_dataset(dataset_name, self.df_test, tokenizer, label_nums)
+        self.test_dataloader = get_dataloader(dataset_name, self.test_dataset, batch_size)
 
         self.name = dataset_name
 
