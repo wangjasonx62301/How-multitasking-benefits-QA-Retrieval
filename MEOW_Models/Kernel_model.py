@@ -134,7 +134,7 @@ class ModelingQA(torch.nn.Module):  # LSTM + Highway_layer
         self.device = device
         self.highway_layer = Highway_layer()
         # self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=1, batch_first=True)
-        self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=2, batch_first=True, dropout = 0.2)
+        self.LSTM = torch.nn.LSTM(input_size=hid_size, hidden_size=hid_size, num_layers=2, batch_first=True, dropout = 0.4, bidirectional = True)
 
     def forward(
         self,
@@ -147,18 +147,26 @@ class ModelingQA(torch.nn.Module):  # LSTM + Highway_layer
 
         context_LHL = get_context_from_LHL(last_hidden_layer, SEPind) # (batch_size, max_context_length, 768)
         
-        #### highway
+        #### highway --------------------------------
         highway_output = self.highway_layer(context_LHL) # (batch_size, max_context_length, 768)
+        ## we need the mtx tor get retrieve the context because after the highway later the zero tensor will add the constant tensor
         mtx = get_retrieve_context_matrix(SEPind, max_context_len = highway_output.size(1), hidden_layer_size = hidden_size)
         mtx = mtx.to(self.device)
         highway_output = highway_output * mtx
+        #### ----------------------------------------
 
-        #### LSTM
+        #### LSTM -----------------------------------
         context_PACk = pading_empty_tensor(highway_output) # this is an object
         output, (hn,cn) = self.LSTM(context_PACk)
         output, input_sizes = pad_packed_sequence(output, batch_first=True) # output is (batch_size, context_padding_length, 768)
+
+        out_split = output.view(output.size(0), output.size(1), 2, int(output.size(2)/2))
+        out_forward = out_split[:, :, 0, :]
+        out_backward = out_split[:, :, 1, :]
+        concat_output = out_forward + out_backward
+        #### ----------------------------------------
         
-        return output
+        return concat_output
 
 class ModelingCLF(torch.nn.Module):
     def get_2d_init_tensor(self,m,n):
@@ -179,22 +187,41 @@ class ModelingCLF(torch.nn.Module):
         # self.bcls = Parameter(self.get_1d_init_tensor(num_labels))
         
         self.pooler = pooler
+        self.dropout = torch.nn.Dropout(p=0.2)
         self.hidden_size = hidden_size
+
+        self.linear_4bertlastlayer = torch.nn.Linear(in_features=768*4, out_features=768)
+        self.dropout = torch.nn.Dropout(p=0.3)
+
         self.device = device
         
 
     def forward(
         self,
         SEPind : List,
-        outputs : BaseModelOutputWithPoolingAndCrossAttentions # this is the output of BertWithoutEmbedding
+        bert_output : BaseModelOutputWithPoolingAndCrossAttentions # this is the output of BertWithoutEmbedding
         ) -> Tuple[torch.Tensor]: # return loss only
         
-        LHL = outputs.last_hidden_state
-        pooler_outupt = self.pooler(LHL) # (batch_size, sequence_length, hidden_size:768)
-        
+        #### the output of orignial pooler output
+        LHL = bert_output.last_hidden_state
+        pooler_outupt = self.pooler(LHL) # (batch_size, hidden_size:768)
+        pooler_outupt = self.dropout(pooler_outupt)
+        ####---------------------------------------------------
+
+        #### --- bert 4 last hidden concat and output 
+        last4layer = bert_output.hidden_states
+        v1 = last4layer[-1][:,0,:]
+        v2 = last4layer[-2][:,0,:]
+        v3 = last4layer[-3][:,0,:]
+        v4 = last4layer[-4][:,0,:]
+
+        vec = torch.cat([v1,v2,v3,v4], dim=1)
+        linear_output = self.linear_4bertlastlayer(vec)
+        linear_output = self.dropout(linear_output)
+        ####---------------------------------------------------
 
         # cls_output = last_hidden_layer[:,0]
         # cls_score = torch.matmul(cls_output, self.Wcls)
         # cls_score = self.activation(cls_score)
         
-        return pooler_outupt
+        return pooler_outupt + linear_output

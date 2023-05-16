@@ -4,65 +4,58 @@ from MEOW_Models.Kernel_model import BertWithoutEmbedding, ModelingQA, ModelingC
 from MEOW_Utils.Data_utils import DataBox
 from typing import*
 
-class MEOW_MTM:
+class MEOW_MTM(torch.nn.Module):
     def __init__(
         self,
         kernel_model : BertWithoutEmbedding,
         modeling_layer_for_qa : ModelingQA,
-        CoLA_databox : DataBox = None,
-        MNLI_databox : DataBox = None,
-        SQuAD_databox : DataBox = None,
+        qa_databox : DataBox,
+        support_databox_list : torch.nn.ModuleList = None,
         device = None):
+
+        super(MEOW_MTM, self).__init__()
                 
         self.device = device
         self.kernel_model = kernel_model
-        
-        self.has_CoLA = CoLA_databox != None
-        self.has_MNLI = MNLI_databox != None
-        self.has_SQuAD = SQuAD_databox != None
+        self.support_data_num = len(support_databox_list)
+
+        self.support_key = torch.nn.Linear(768, 768)
+        self.target_query = torch.nn.Linear(768, 768) ## use the output of SQuAD's output
 
         #### initial all model
         #### ---------------------------------------------------------------------------------
-        if self.has_CoLA :
-            self.CoLA_model = Bert_classification(kernel_model,
-                                                  CoLA_databox.embedding_layer, 
-                                                  CoLA_databox.modeling_layer, 
-                                                  CoLA_databox.label_nums, 
-                                                  device)
-            self.CoLA_optimizer = torch.optim.SGD(self.CoLA_model.parameters(), lr=0.00005, momentum=0.9)
+        self.support_modulelist = torch.nn.ModuleList()
+        self.optimizer_list = []     # optimizer_list[-1] is QA optimizer
 
-        if self.has_MNLI :
-            self.MNLI_model = Bert_classification(kernel_model, 
-                                                  MNLI_databox.embedding_layer, 
-                                                  MNLI_databox.modeling_layer, 
-                                                  MNLI_databox.label_nums, 
-                                                  device)
-            self.MNLI_optimizer = torch.optim.SGD(self.MNLI_model.parameters(), lr=0.00005, momentum=0.9)
-
-        if self.has_SQuAD :
-            self.SQuAD_model = Bert_QA(kernel_model,
-                                       SQuAD_databox.embedding_layer, 
-                                       SQuAD_databox.modeling_layer,
-                                       modeling_layer_for_qa,
-                                       num_labels = 2, 
-                                       device = device)
-            self.SQuAD_optimizer = torch.optim.SGD(self.SQuAD_model.parameters(), lr=0.00005, momentum=0.9)
-        #### ---------------------------------------------------------------------------------
-        #### ---------------------------------------------------------------------------------
-
-        self.change_the_device(device)
-
-        self.forward_dict = {'CoLA' : self.CoLA_forward,
-                             'MNLI' : self.MNLI_forward,
-                             'SQuAD' : self.SQuAD_forward}
+        #### for support data ----------------------
+        for i in range(self.support_data_num):
+            self.support_modulelist.append( Bert_classification(kernel_model, 
+                                                                 support_databox_list[i].embedding_layer,
+                                                                 support_databox_list[i].clf_modeling_layer,
+                                                                 support_databox_list[i].label_nums,
+                                                                 device) )
+            self.optimizer_list.append(torch.optim.SGD(self.support_modulelist[0].parameters(), lr=0.00005, momentum=0.9))
         
-        self.optimize_dict = {'CoLA' : self.optimize_CoLA,
-                              'MNLI' : self.optimize_MNLI,
-                              'SQuAD' : self.optimize_SQuAD}
         
+        #### ---------------------------------------
+        #### ---------------------------------------
+         
+        #### for target data -----------------------
+        self.SQuAD_model = Bert_QA(kernel_model,
+                                    qa_databox.embedding_layer, 
+                                    qa_databox.clf_modeling_layer,
+                                    modeling_layer_for_qa,
+                                    num_labels = 2,
+                                    support_modulelist = self.support_modulelist,
+                                    support_key = self.support_key,
+                                    target_query = self.target_query,
+                                    device = device)
+        self.SQuAD_optimizer = torch.optim.SGD(self.SQuAD_model.parameters(), lr=0.00005, momentum=0.9)
+        #### ---------------------------------------
+        #### ---------------------------------------
+
     def mt_forward(self,
-                   task_type : str,
-                   dataset_name : str,
+                   dataset_ind : int,
                    input_ids : torch.tensor, 
                    mask : torch.tensor, 
                    token_type_ids : torch.tensor, 
@@ -72,69 +65,16 @@ class MEOW_MTM:
                    end_pos : List = None,  #for qa
                    return_toks : bool = False # for qa
                    ):
-        if(task_type == 'Classification'):
-            return self.forward_dict[dataset_name](input_ids, mask, token_type_ids, SEPind, label)
-        else:
-            return self.forward_dict[dataset_name](input_ids, mask, token_type_ids, SEPind, label, start_pos, end_pos, return_toks)
         
-    def mt_optimize(self, loss, dataset_name):
-        self.optimize_dict[dataset_name](loss)
-
-    def change_the_device(self, device):
-        if self.has_CoLA :
-            self.CoLA_model.to(device)
-        if self.has_MNLI :
-            self.MNLI_model.to(device)
-        if self.has_SQuAD :
-            self.SQuAD_model.to(device)
-
-        # self.MNLI_model.to(device)
-        # self.RTE_model.to(device)
-
-    def optimize_CoLA(self, loss):
-        optimizer = self.CoLA_optimizer
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    
-    def optimize_MNLI(self, loss):
-        optimizer = self.MNLI_optimizer
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    
-    def optimize_SQuAD(self, loss):
-        optimizer = self.SQuAD_optimizer
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-    
-    def CoLA_forward(self, input_ids, mask, token_type_ids, SEPind, label):
-        return self.CoLA_model(input_ids, mask, token_type_ids, SEPind, label)
-
-    def MNLI_forward(self, input_ids, mask, token_type_ids, SEPind, label):
-        return self.MNLI_model(input_ids, mask, token_type_ids, SEPind, label)
-
-    def SQuAD_forward(self, input_ids, mask, token_type_ids, SEPind, label = None, start_pos = None, end_pos = None, return_toks = False):
+        if(dataset_ind < self.support_data_num): ## is clf task
+            return self.support_modulelist[dataset_ind](input_ids, mask, token_type_ids, SEPind, label)
         return self.SQuAD_model(input_ids, mask, token_type_ids, SEPind, label, start_pos, end_pos, return_toks)
-     
-    def train(self):
-        if(self.has_CoLA) :
-            self.CoLA_model.train()
-        if(self.has_MNLI) :
-            self.MNLI_model.train()
-        if(self.has_SQuAD) :
-            self.SQuAD_model.train()
-        # self.MNLI_model.train()
-        # self.RTE_model.train()
 
-    def eval(self):
-        if self.has_CoLA :
-            self.CoLA_model.eval()
-        if self.has_MNLI :
-            self.MNLI_model.eval()
-        if self.has_SQuAD :
-            self.SQuAD_model.eval()
-
-        # self.MNLI_model.eval()
-        # self.RTE_model.eval()
+    def mt_optimize(self, loss, dataset_ind):
+        if dataset_ind == self.support_data_num :
+            optimizer = self.SQuAD_optimizer
+        else :
+            optimizer = self.optimizer_list[dataset_ind]
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
