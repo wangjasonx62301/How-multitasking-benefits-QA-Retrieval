@@ -34,12 +34,12 @@ class MEOW_MTM(torch.nn.Module):
                                                                  modeling_layer = Helper.get_modelings_layer_clf(individual_pooler=True),
                                                                  num_labels = support_databox_list[i].label_nums,
                                                                  device = device) )
-            self.optimizer_list.append(torch.optim.SGD(self.support_modulelist[0].parameters(), lr=0.00005, momentum=0.9))
+            self.optimizer_list.append(torch.optim.SGD(self.support_modulelist[0].parameters(), lr=0.0001, momentum=0.9, nesterov=True))
         
         
         #### ---------------------------------------
         #### ---------------------------------------
-         
+        
         #### for target data -----------------------
         self.SQuAD_model = Bert_QA(self.kernel_model,
                                     Helper.get_embedding_layer(individual=False), 
@@ -51,7 +51,7 @@ class MEOW_MTM(torch.nn.Module):
                                     target_query = self.target_query,
                                     do_mtl = do_mtl,
                                     device = device)
-        self.SQuAD_optimizer = torch.optim.SGD(self.SQuAD_model.parameters(), lr=0.00005, momentum=0.9)
+        self.SQuAD_optimizer = torch.optim.SGD(self.SQuAD_model.parameters(), lr=0.00005, momentum=0.9, nesterov=True)
         #### ---------------------------------------
         #### ---------------------------------------
 
