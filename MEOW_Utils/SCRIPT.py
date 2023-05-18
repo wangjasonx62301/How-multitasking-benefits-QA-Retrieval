@@ -125,7 +125,7 @@ def SCRIP_GET_TRAINTEST_ROUND():
     print(f'Per epoc round\'s num is {Training_round}')
     print(f'Per epoc round\'s num is {Test_round}')
 
-def SCRIPT_SET_MODEL(do_mtl = True, path = None):
+def SCRIPT_SET_MODEL(do_mtl = True, path = None, qa_optim_path = None):
     global Helper
     Helper = layer_helper(pretrained_module_name=PRETRAINED_MODULE_NAME, device=DEVICE)
 
@@ -143,7 +143,11 @@ def SCRIPT_SET_MODEL(do_mtl = True, path = None):
         MEOW_model.eval()
         print("load the model successfully")
     else:
-        print("initial the model successfully")
+        print("initial the model successfully") 
+    
+    if qa_optim_path:
+        MEOW_model.SQuAD_optimizer.load_state_dict(torch.load(qa_optim_path)) 
+        print("load the optimizer successfully") 
 
     return MEOW_model
 
@@ -277,12 +281,6 @@ def SCRIPT_TRAIN_QA(epoch_num):
         print(" ")
         
         ################################################################################################################
-
-def SCRIPT_LOAD_MODEL(model):
-    global MEOW_model
-    MEOW_model = model
-    MEOW_model.to(DEVICE)
-    return 
 
 def SCRIPT_TRAIN_BOTH_SIMU(epoch_num):
     # 訓練
