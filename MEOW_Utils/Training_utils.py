@@ -135,29 +135,18 @@ def count_F1_score(MEOW_model : MEOW_MTM,
         input_ids = torch.tensor([EC['input_ids']])  # 要讓他升一個維度 表示batch
         mask = torch.tensor([EC['attention_mask']])
         token = torch.tensor([EC['token_type_ids']])
-        label = [[0.] * 2]
-        label[0][df['label'][i]] = 1.
-
-        label = torch.tensor(label, dtype=torch.float)
 
         input_ids = input_ids.to(device)
         mask = mask.to(device)
         token = token.to(device)
-        label = label.to(device)
 
-        Start_pos, End_pos = count_the_TKbeg_and_TKend(df['context'][i], df['answer_start'][i], df['text'][i], tokenizer)
-        
-        Start_pos = [Start_pos]
-        End_pos = [End_pos]
+
 
         toks = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
                                      input_ids=input_ids,
                                      mask=mask,
                                      token_type_ids=token,
                                      SEPind=SEPind,
-                                     label=label,
-                                     start_pos=Start_pos,
-                                     end_pos=End_pos,
                                      return_toks=True)
 
         ans_toks = tokenizer.tokenize(df['text'][i])

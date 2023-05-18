@@ -74,7 +74,8 @@ class Bert_QA(torch.nn.Module):
         support_modulelist : torch.nn.ModuleList,
         support_key : torch.nn.Linear, 
         target_query : torch.nn.Linear,
-        device
+        do_mtl = True,
+        device = None
         ):
         super(Bert_QA, self).__init__()
 
@@ -83,6 +84,8 @@ class Bert_QA(torch.nn.Module):
         self.modeling_layer_clf = modeling_layer_for_clf
         self.modeling_layer_qa = modeling_layer_for_qa
       
+        self.do_mtl = do_mtl
+
         self.device = device
         self.hid_size = kernel_model.config.hidden_size
 
@@ -109,7 +112,7 @@ class Bert_QA(torch.nn.Module):
         input_ids : torch.tensor,
         attention_mask : torch.tensor,
         token : torch.tensor,
-        SEPind : List,
+        SEPind : List = None,
         label : torch.tensor = None, # reference dont need
         start_pos : List = None,  # reference dont need
         end_pos : List = None, # reference dont need
@@ -137,33 +140,35 @@ class Bert_QA(torch.nn.Module):
 
         ## methoed (1) BY SELF ATTENTION
         ##  ------------------------------------------------------------------------------------------------
-        # value_list = []
-        # key_list = []
-        
-        # output_clf_target = self.modeling_layer_clf(SEPind, bert_output)  # (batch_size, 768)
-        # # value_list.append(output_clf_target)
-        # # key_list.append(self.support_key(output_clf_target))
+        if self.do_mtl : 
+            value_list = []
+            key_list = []
+            
+            output_clf_target = self.modeling_layer_clf(SEPind, bert_output)  # (batch_size, 768)
+            # value_list.append(output_clf_target)
+            # key_list.append(self.support_key(output_clf_target))
 
-        # for model in self.support_modulelist:
-        #     output_clf_support = model.modeling_layer(SEPind, bert_output)
-        #     value_list.append(output_clf_support)
-        #     key_list.append(self.support_key(output_clf_support))
+            for model in self.support_modulelist:
+                output_clf_support = model.modeling_layer(SEPind, bert_output)
+                value_list.append(output_clf_support)
+                key_list.append(self.support_key(output_clf_support))
 
-        # val = torch.stack(value_list).transpose(0,1)  #### batchsize * dataset_num * 768
-        # key = torch.stack(key_list).transpose(0,1)  #### batchsize * dataset_num * 768
-        # query = self.target_query(output_clf_target)[:,None,:] #### batchsize * 1 * 768
+            val = torch.stack(value_list).transpose(0,1)  #### batchsize * dataset_num * 768
+            key = torch.stack(key_list).transpose(0,1)  #### batchsize * dataset_num * 768
+            query = self.target_query(output_clf_target)[:,None,:] #### batchsize * 1 * 768
 
-        # attention_score = torch.matmul(query, key.transpose(-1,-2)).squeeze(dim=1) #### batchsize * 1 * 768 =>(squeeze) batchsize * datasetnum
-        # attention_score = attention_score / math.sqrt(768)
-        # attention_prob = torch.nn.functional.softmax(attention_score, dim=-1) # batchsize * dataset_num
+            attention_score = torch.matmul(query, key.transpose(-1,-2)).squeeze(dim=1) #### batchsize * 1 * 768 =>(squeeze) batchsize * datasetnum
+            attention_score = attention_score / math.sqrt(768)
+            attention_prob = torch.nn.functional.softmax(attention_score, dim=-1) # batchsize * dataset_num
 
-        # # print(attention_prob)
+            # print(attention_prob)
 
-        # output_clf = torch.stack([torch.matmul(attention_prob[i], val[i]) for i in range(this_batch_size)]) #(batch_size, 768)
+            output_clf = torch.stack([torch.matmul(attention_prob[i], val[i]) for i in range(this_batch_size)]) #(batch_size, 768)
         ## -------------------------------------------------------------------------------------------------
         
         ## method (2) USE ONLY 1 MOELING -------------------------------------------------------------------
-        output_clf = self.modeling_layer_clf(SEPind, bert_output)
+        else:
+            output_clf = self.modeling_layer_clf(SEPind, bert_output)
         ## -------------------------------------------------------------------------------------------------
 
         ####################################################################################################
@@ -191,7 +196,6 @@ class Bert_QA(torch.nn.Module):
         #### ONLY REFERENCE AND DON'T NEED LOSS #################################################
         ####-----------------------------------------------------------------------------
         if return_toks == True :
-            print("hello")
             start_tok = start_score.argmax(dim=1)
             end_tok = end_score.argmax(dim=1)
 
@@ -202,7 +206,7 @@ class Bert_QA(torch.nn.Module):
                     batch_toks.append([])
                 else :
                     batch_toks.append(input_ids[i, start_tok[i]+1 : end_tok[i]+2])  # +1 +2 because of [CLS]    
-
+            
             return batch_toks
         #########################################################################################
         

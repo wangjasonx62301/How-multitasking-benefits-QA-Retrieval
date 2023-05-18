@@ -297,8 +297,6 @@ def get_dataloader(dataset_name, dataset, batch_size):
 class DataBox():
     def __init__(
     self,
-    embedding_layer : BertEmbeddings,
-    clfmodeling_layer : ModelingCLF,
     df_Data : DataFrame,
     test_size : int, 
     tokenizer : BertTokenizer,
@@ -310,9 +308,6 @@ class DataBox():
         self.df_train = df_train.reset_index(drop=True)
         self.df_test = df_test.reset_index(drop=True)
         self.label_nums = label_nums
-
-        self.embedding_layer = embedding_layer
-        self.clf_modeling_layer = clfmodeling_layer
 
         self.training_dataset = get_dataset(dataset_name, self.df_train, tokenizer, label_nums)
         self.training_dataloader = get_dataloader(dataset_name, self.training_dataset, batch_size)
