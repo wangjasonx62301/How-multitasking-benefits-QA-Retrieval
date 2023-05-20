@@ -284,7 +284,7 @@ def SCRIPT_TRAIN_QA(epoch_num):
 
 def SCRIPT_TRAIN_BOTH_SIMU(epoch_num):
     # 訓練
-    for epoch in range(epoch):
+    for epoch in range(epoch_num):
         print("the {:d} iter :".format(epoch+1))
 
         HA_record = Record()
