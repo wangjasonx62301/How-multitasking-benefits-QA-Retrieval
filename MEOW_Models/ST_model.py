@@ -184,6 +184,7 @@ class Bert_QA(torch.nn.Module):
         # CLS_list = [bert_output[i,0, :] for i in range(len(SEPind))]
         # CLS_output = torch.stack(CLS_list)
         clf_score = self.clf_clasifier(output_clf) # (batch_size, 2)
+        prob = self.softmax(clf_score)
         #####################################################################################
  
 
@@ -201,22 +202,20 @@ class Bert_QA(torch.nn.Module):
 
             batch_toks = []
 
-            for i in range (len(input_ids)) :
+            for i in range (this_batch_size) :
                 if clf_score[i].argmax() == 0 : # predict it has no answer
                     batch_toks.append([])
                 else :
                     batch_toks.append(input_ids[i, start_tok[i]+1 : end_tok[i]+2])  # +1 +2 because of [CLS]    
             
-            return batch_toks
+            return batch_toks, prob
         #########################################################################################
         
 
         #### NEED LOSS ##########################################################################
         ####-----------------------------------------------------------------------------
         loss_for_label = self.loss_function_label(clf_score, label)
-        prob = self.softmax(clf_score)
-
-        if label[0][1] == 1 :     
+        if label[0][1] == 1 : 
             # this batch data has answer, need the start and end position loss
 
             start_1hot = torch.zeros(this_batch_size, output_qa.size(1)).to(self.device)
