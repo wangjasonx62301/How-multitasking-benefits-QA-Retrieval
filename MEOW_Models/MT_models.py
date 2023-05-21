@@ -34,7 +34,7 @@ class MEOW_MTM(torch.nn.Module):
                                                                  modeling_layer = Helper.get_modelings_layer_clf(individual_pooler=True),
                                                                  num_labels = support_databox_list[i].label_nums,
                                                                  device = device) )
-            self.optimizer_list.append(torch.optim.SGD(self.support_modulelist[0].parameters(), lr=0.0001, momentum=0.9, nesterov=True))
+            self.optimizer_list.append(torch.optim.SGD(self.support_modulelist[i].parameters(), lr=0.00005, momentum=0.9, nesterov=True))
         
         
         #### ---------------------------------------

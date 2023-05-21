@@ -120,48 +120,6 @@ def Classifiaction_running(MEOW_model : MEOW_MTM,
         
         return loss, prob, correct
 
-def count_F1_score(MEOW_model : MEOW_MTM, 
-                   df : DataFrame, 
-                   tokenizer : BertTokenizer,
-                   device):
-    
-    score = 0
-
-    for i in range(len(df)):
-        EC = tokenizer.encode_plus(df['context'][i], df['question'][i])
-
-        SEPind = [len(tokenizer.tokenize(df['context'][i])) + 1]
-        
-        input_ids = torch.tensor([EC['input_ids']])  # 要讓他升一個維度 表示batch
-        mask = torch.tensor([EC['attention_mask']])
-        token = torch.tensor([EC['token_type_ids']])
-
-        input_ids = input_ids.to(device)
-        mask = mask.to(device)
-        token = token.to(device)
-
-
-
-        toks = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
-                                     input_ids=input_ids,
-                                     mask=mask,
-                                     token_type_ids=token,
-                                     SEPind=SEPind,
-                                     return_toks=True)
-
-        ans_toks = tokenizer.tokenize(df['text'][i])
-        print(ans_toks)
-
-        pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
-        print(pred_toks)
-        print('')
-
-        score += compute_f1(ans_toks, pred_toks)
-
-    print(score / len(df))
-    print('')
-    return 0
-
 def compute_f1(targ_toks : list, pred_toks : list):    
     common = collections.Counter(targ_toks) & collections.Counter(pred_toks)
     num_same = sum(common.values())

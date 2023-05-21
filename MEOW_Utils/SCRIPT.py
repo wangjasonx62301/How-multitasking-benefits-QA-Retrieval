@@ -16,24 +16,20 @@ from MEOW_Utils.Data_utils import*
 from MEOW_Utils.Training_utils import* 
 from MEOW_Utils.config import * 
 
+from torch.utils.data import DataLoader
+
 def SCRIPT_SET_TOKENIZER():
     global tokenizer
     tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODULE_NAME)
-    print("SET CORRECTLY")
+    print("SET TOKENIZER successfully")
 
-def SCRIPT_SET_QAandSUP(check_data_loader = False, run_in_kaggle = True):
-    
-    if run_in_kaggle : 
-        df_CoLA = pd.read_csv(INPUT_FILE_PATH_CoLA_k, index_col=[0])
-        df_MNLI = pd.read_csv(INPUT_FILE_PATH_MNLI_k, index_col=[0])
-        df_SQuAD = pd.read_csv(INPUT_FILE_PATH_SQuAD_k, index_col=[0])
-        df_QNLI = pd.read_csv(INPUT_FILE_PATH_QNLI_k, index_col=[0])
-            
-    else :
-        df_CoLA = pd.read_csv(INPUT_FILE_PATH_CoLA, index_col=[0])
-        df_MNLI = pd.read_csv(INPUT_FILE_PATH_MNLI, index_col=[0])
-        df_SQuAD = pd.read_csv(INPUT_FILE_PATH_SQuAD, index_col=[0])
-        df_QNLI = pd.read_csv(INPUT_FILE_PATH_QNLI, index_col=[0])
+def SCRIPT_SET_QAandSUP(check_data_loader = False, path = ''):
+
+    df_CoLA = pd.read_csv(path + INPUT_FILE_PATH_CoLA, index_col=[0])
+    df_MNLI = pd.read_csv(path + INPUT_FILE_PATH_MNLI, index_col=[0])
+    df_SQuAD = pd.read_csv(path + INPUT_FILE_PATH_SQuAD, index_col=[0])
+    df_QNLI = pd.read_csv(path + INPUT_FILE_PATH_QNLI, index_col=[0])
+    df_RTE = pd.read_csv(path + INPUT_FILE_PATH_RTE, index_col=[0]) 
 
     df_SQuAD_HA = df_SQuAD[df_SQuAD.answer_start != -1]
     df_SQuAD_NA = df_SQuAD[df_SQuAD.answer_start == -1]
@@ -83,6 +79,15 @@ def SCRIPT_SET_QAandSUP(check_data_loader = False, run_in_kaggle = True):
                 batch_size = Support_BATCH_SIZE
                 )
     
+    RTE_databox = DataBox(
+                dataset_name = 'RTE',
+                df_Data = df_RTE,
+                test_size = TEST_SIZE,
+                tokenizer = tokenizer,
+                label_nums = 2,
+                batch_size = Support_BATCH_SIZE
+                )
+
     #### check no wrong in dataloader ####
     if check_data_loader : 
         for i in SQuAD_NA_databox.test_dataloader:
@@ -95,15 +100,18 @@ def SCRIPT_SET_QAandSUP(check_data_loader = False, run_in_kaggle = True):
             0
         for i in QNLI_databox.test_dataloader:
             0
+        for i in RTE_databox.test_dataloader:
+            0
     ################
 
     global Training_round
 
     Training_round = min(len(SQuAD_HA_databox.training_dataloader),
-                     len(SQuAD_NA_databox.training_dataloader),
-                     len(MNLI_databox.training_dataloader),
-                     len(CoLA_databox.training_dataloader),
-                     len(QNLI_databox.training_dataloader))
+                          len(SQuAD_NA_databox.training_dataloader),
+                          len(MNLI_databox.training_dataloader),
+                          len(CoLA_databox.training_dataloader),
+                          len(QNLI_databox.training_dataloader),
+                          len(RTE_databox.training_dataloader))
 
     global Test_round
 
@@ -111,15 +119,16 @@ def SCRIPT_SET_QAandSUP(check_data_loader = False, run_in_kaggle = True):
                  len(SQuAD_NA_databox.test_dataloader),
                  len(MNLI_databox.test_dataloader),
                  len(CoLA_databox.test_dataloader),
-                 len(QNLI_databox.test_dataloader))
+                 len(QNLI_databox.test_dataloader),
+                 len(RTE_databox.test_dataloader))
 
     global SQuAD_list
     SQuAD_list = [SQuAD_HA_databox, SQuAD_NA_databox]
 
     global SUP_list
-    SUP_list = [CoLA_databox, MNLI_databox, QNLI_databox]
+    SUP_list = [CoLA_databox, MNLI_databox, QNLI_databox, RTE_databox]
 
-    print("SET CORRECTLY")
+    print("SET DATASET successfully")
 
 def SCRIP_GET_TRAINTEST_ROUND():
     print(f'Per epoc round\'s num is {Training_round}')
@@ -151,9 +160,111 @@ def SCRIPT_SET_MODEL(do_mtl = True, path = None, qa_optim_path = None):
 
     return MEOW_model
 
-def SCRIPT_RUN_F1_score():
-    df = pd.concat([SQuAD_list[0].df_test, SQuAD_list[1].df_test]).reset_index(drop=True)
-    count_F1_score(MEOW_model, df, tokenizer, DEVICE)
+def SCRIPT_EVALUATE_MODEL():
+    df_HA = SQuAD_list[0].df_test
+    dset_HA = QA_evalaute_dataset(df_HA, tokenizer, 2)
+    dloader_HA = DataLoader(dset_HA, batch_size=8, shuffle=False, collate_fn=QA_evaluate_collate_batch)
+
+    df_NA = SQuAD_list[1].df_test
+    dset_NA = QA_evalaute_dataset(df_NA, tokenizer, 2)
+    dloader_NA = DataLoader(dset_NA, batch_size=8, shuffle=False, collate_fn=QA_evaluate_collate_batch)
+
+    HA_total_correct = 0
+    HA_score = 0.0
+    NA_total_correct = 0
+    HA_score = 0.0
+
+    NA_total_correct = 0
+    NA_score = 0.0
+    NA_total_correct = 0
+    NA_score = 0.0
+
+    for d in dloader_HA:
+        input_ids, mask, token, label, SEPind, i_batch = d
+        
+        orgdevice = input_ids.device
+
+        input_ids = input_ids.to(DEVICE)
+        mask = mask.to(DEVICE)
+        token = token.to(DEVICE)
+        label = label.to(DEVICE)
+        
+        toks, prob = MEOW_model.mt_forward(dataset_ind = DATA_IND['SQuAD'],
+                                            input_ids = input_ids, 
+                                            mask = mask, 
+                                            token_type_ids = token,
+                                            SEPind = SEPind,
+                                            return_toks = True)
+        
+        correct_num = count_correct_num(prob, label)
+        HA_total_correct += correct_num
+
+        # to provent the cuda from out of memory
+        # use to orgdevice to releace the memory allocated to tensor
+        input_ids = input_ids.to(orgdevice)
+        mask = mask.to(orgdevice)
+        token = token.to(orgdevice)
+        label = label.to(orgdevice)
+
+        for k in range(len(input_ids)):
+            ans_toks = tokenizer.tokenize(df_HA['text'][i_batch[k]])
+            # print(ans_toks)
+            pred_toks = tokenizer.convert_ids_to_tokens(toks[k])
+            # print(pred_toks)
+            # print('')
+            HA_score += compute_f1(ans_toks, pred_toks)
+
+    for d in dloader_NA:
+        input_ids, mask, token, label, SEPind, i_batch = d
+        
+        orgdevice = input_ids.device
+
+        input_ids = input_ids.to(DEVICE)
+        mask = mask.to(DEVICE)
+        token = token.to(DEVICE)
+        label = label.to(DEVICE)
+        
+        toks, prob = MEOW_model.mt_forward(dataset_ind = DATA_IND['SQuAD'],
+                                            input_ids = input_ids, 
+                                            mask = mask, 
+                                            token_type_ids = token,
+                                            SEPind = SEPind,
+                                            return_toks = True)
+        
+        correct_num = count_correct_num(prob, label)
+        NA_total_correct += correct_num
+
+        # to provent the cuda from out of memory
+        # use to orgdevice to releace the memory allocated to tensor
+        input_ids = input_ids.to(orgdevice)
+        mask = mask.to(orgdevice)
+        token = token.to(orgdevice)
+        label = label.to(orgdevice)
+
+        for k in range(len(input_ids)):
+            ans_toks = tokenizer.tokenize(df_NA['text'][i_batch[k]])
+            # print(ans_toks)
+            pred_toks = tokenizer.convert_ids_to_tokens(toks[k])
+            # print(pred_toks)
+            # print('')
+            NA_score += compute_f1(ans_toks, pred_toks)
+    
+    print("HAS ANSWER :")
+    print("data num : {:d}", len(df_HA))
+    print("f1 score : {:.4f}", HA_score / len(df_HA))
+    print("Precision : {:d}", HA_total_correct / len(df_HA))
+    print("Recall : {:d}", HA_total_correct / (HA_total_correct + len(df_NA) - NA_total_correct))
+
+    print("")
+
+    print("NO ANSWER :")
+
+    print("data num : {:d}", len(df_NA))
+    print("f1 score : {:.4f}", NA_score / len(df_NA))
+    print("Precision : {:d}", NA_total_correct / len(df_NA))
+    print("Recall : {:d}", NA_total_correct / (NA_total_correct + len(df_HA) - HA_total_correct))
+
+    print("")
 
 def SCRIPT_TRAIN_SUPPORT(epoch_num):
     # 訓練
@@ -402,5 +513,5 @@ def SCRIPT_ACK_QUESTION(context, question):
                                     return_toks=True)
 
     # pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
-    print(tokenizer.decode(toks[0]))
+    print(tokenizer.decode(toks[0][0]))
     print('')

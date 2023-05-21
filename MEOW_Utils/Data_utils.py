@@ -185,8 +185,6 @@ def create_QNLI_df(file_path, tokenizer = None, data_size = 0):
     if(data_size != 0):
         df = df[0:data_size]
 
-    print()
-
     for i in range(len(df)):
         print(i)
         if( len(tokenizer.tokenize(df['question'][i])) + len(tokenizer.tokenize(df['sentence'][i])) >= 510 ):
@@ -209,6 +207,31 @@ def create_QNLI_df(file_path, tokenizer = None, data_size = 0):
     df['context2'] = df['context2'].fillna(' ')
 
     df.to_csv('Dataset_infile\_QNLI.csv')
+
+def create_RTE_df(file_path, tokenizer = None, data_size = 0):
+    df = pd.read_csv(file_path, index_col=[0])
+    if(data_size != 0):
+        df = df[0:data_size]
+
+    for i in range(len(df)):
+        print(i)
+        if( len(tokenizer.tokenize(df['context1'][i])) + len(tokenizer.tokenize(df['context2'][i])) >= 510 ):
+            df = df.drop(i, axis=0)
+            i = i-1
+    
+    balanced_df = get_balanced_df(df, column_name='label')
+    balanced_df = balanced_df.reset_index(drop=True)
+    df = balanced_df
+
+    df['label_name'] = df['label']
+    df['label'] = df['label_name'].replace({'not_entailment':0, 'entailment':1})
+
+    df['SEP_ind'] = df['context1'].apply(lambda x : len(tokenizer.tokenize(x))+1) # +1 is [CLS]
+    df['context2'] = df['context2'].fillna(' ')
+
+    df.to_csv('Dataset_infile\_RTE.csv')
+
+
 ####------------------------------------------------------------------------
 
 # get dataset
@@ -222,14 +245,18 @@ def get_MNLI_dataset(df_MNLI, tokenizer, num_labels):
 def get_SQuAD_dataset(df_SQuAD, tokenizer, num_labels = None): #num_labels hasn't use but for formalize
     return QAdataset(df_SQuAD, tokenizer=tokenizer, num_labels=num_labels)
 
-def get_QNLI_dataset(df_QNLI, tokenizer, num_labels = None):
+def get_QNLI_dataset(df_QNLI, tokenizer, num_labels):
     return Classification_dataset(df_QNLI, tokenizer, num_labels)
+
+def get_RTE_dataset(df_RTE, tokenizer, num_labels):
+    return Classification_dataset(df_RTE, tokenizer, num_labels)
 
 get_dataset_dict = {
                     'CoLA': get_CoLA_dataset, 
                     'MNLI' : get_MNLI_dataset, 
                     'SQuAD' : get_SQuAD_dataset,
-                    'QNLI' : get_QNLI_dataset}
+                    'QNLI' : get_QNLI_dataset,
+                    'RTE' : get_RTE_dataset}
 
 def get_dataset(dataset_name, df, tokenizer = None, num_labels = None):
     return get_dataset_dict[dataset_name](df, tokenizer, num_labels)
@@ -252,6 +279,21 @@ def QA_collate_batch(sample): #sample is List
     label_batch = torch.tensor(label_batch, dtype=torch.float)
 
     return input_ids_batch, mask_batch, token_batch, label_batch, SEP_index_batch, Start_batch, End_batch
+
+def QA_evaluate_collate_batch(sample):
+    input_ids_batch = [s[0] for s in sample]
+    mask_batch = [s[1] for s in sample]
+    token_batch = [s[2] for s in sample]
+    label_batch = [s[3] for s in sample]
+    SEP_index_batch = [s[4] for s in sample]
+    index_batch = [s[5] for s in sample]
+
+    input_ids_batch = pad_sequence(input_ids_batch, batch_first=True)
+    mask_batch = pad_sequence(mask_batch, batch_first=True)
+    token_batch = pad_sequence(token_batch, batch_first=True)
+    label_batch = torch.tensor(label_batch, dtype=torch.float)
+
+    return input_ids_batch, mask_batch, token_batch, label_batch, SEP_index_batch, index_batch
 
 def Classification_collate_batch(sample): #sample is List
     input_ids_batch = [s[0] for s in sample]
@@ -283,11 +325,15 @@ def get_SQuAD_dataloader(dataset, batch_size):
 def get_QNLI_dataloader(dataset, batch_size):
     return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
 
+def get_RTE_dataloader(dataset, batch_size):
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=Classification_collate_batch)
+
 get_loader_dict = {
                     'CoLA': get_CoLA_dataloader, 
                     'MNLI' : get_MNLI_dataloader,
                     'SQuAD' : get_SQuAD_dataloader,
-                    'QNLI' : get_QNLI_dataloader}
+                    'QNLI' : get_QNLI_dataloader,
+                    'RTE' : get_RTE_dataloader}
 
 def get_dataloader(dataset_name, dataset, batch_size):
     dataset = get_loader_dict[dataset_name](dataset, batch_size)
@@ -363,6 +409,27 @@ class QAdataset(Dataset):
         label[df['label'][index]] = 1.
 
         return input_ids, mask, token, label, df['SEP_ind'][index], df['TKstart'][index], df['TKend'][index]
+    
+    def __len__(self):
+        return len(self.df)
+    
+class QA_evalaute_dataset(Dataset):
+    def __init__(self, df, tokenizer, num_labels):
+        self.tokenizer = tokenizer
+        self.num_labels = num_labels
+        self.df = df
+    
+    def __getitem__(self, index):
+        df = self.df
+        EC = self.tokenizer.encode_plus(df['context'][index], df['question'][index])
+        
+        input_ids = torch.tensor(EC['input_ids'])
+        mask = torch.tensor(EC['attention_mask'])
+        token = torch.tensor(EC['token_type_ids'])
+        label = [0.] * self.num_labels
+        label[df['label'][index]] = 1.
+
+        return input_ids, mask, token, label, df['SEP_ind'][index], index
     
     def __len__(self):
         return len(self.df)
