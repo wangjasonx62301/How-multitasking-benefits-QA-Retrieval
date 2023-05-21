@@ -1,12 +1,12 @@
 import torch
 
-# DATA_NAME = {0:'CoLA', 1:'MNLI', 2:'QNLI', 3:'RTE', 4:'SQuAD'}
-# DATA_IND = {'ClLA':0, 'MNLI':1, 'QNLI':2, 'RTE':3, 'SQuAD':4}
-# SUPPORT_DATA_NUM = 4
+DATA_NAME = {0:'CoLA', 1:'MNLI', 2:'QNLI', 3:'RTE', 4:'SQuAD'}
+DATA_IND = {'ClLA':0, 'MNLI':1, 'QNLI':2, 'RTE':3, 'SQuAD':4}
+SUPPORT_DATA_NUM = 4
 
-DATA_NAME = {0:'CoLA', 1:'MNLI', 2:'QNLI', 3:'SQuAD'}
-DATA_IND = {'ClLA':0, 'MNLI':1, 'QNLI':2, 'SQuAD':3}
-SUPPORT_DATA_NUM = 3
+# DATA_NAME = {0:'CoLA', 1:'MNLI', 2:'QNLI', 3:'SQuAD'}
+# DATA_IND = {'ClLA':0, 'MNLI':1, 'QNLI':2, 'SQuAD':3}
+# SUPPORT_DATA_NUM = 3
 
 Target_BATCH_SIZE = 8
 Support_BATCH_SIZE = 4
