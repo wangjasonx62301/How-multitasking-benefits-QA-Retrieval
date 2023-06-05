@@ -68,7 +68,7 @@ def QA_running(MEOW_model : MEOW_MTM,
                                             label=label,
                                             start_pos = Start_pos,
                                             end_pos = End_pos,
-                                            return_toks = return_toks)
+                                            eval = return_toks)
         
         correct_num = count_correct_num(prob, label)
         if do_optimize:

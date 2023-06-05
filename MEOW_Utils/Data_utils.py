@@ -146,6 +146,7 @@ def create_SQuAD_df(file_path, tokenizer = None, data_size = 0):
         # df_train = df_train.sample(data_size)
         # df_train = df_train.reset_index(drop=True)
         df_train = df_train[0:data_size]
+        df_train = df_train.sample(data_size).reset_index(drop=True)
 
     # question,context
 
@@ -230,7 +231,6 @@ def create_RTE_df(file_path, tokenizer = None, data_size = 0):
     df['context2'] = df['context2'].fillna(' ')
 
     df.to_csv('Dataset_infile\_RTE.csv')
-
 
 ####------------------------------------------------------------------------
 
@@ -413,6 +413,7 @@ class QAdataset(Dataset):
     def __len__(self):
         return len(self.df)
     
+#### this is use when do the evaluation
 class QA_evalaute_dataset(Dataset):
     def __init__(self, df, tokenizer, num_labels):
         self.tokenizer = tokenizer

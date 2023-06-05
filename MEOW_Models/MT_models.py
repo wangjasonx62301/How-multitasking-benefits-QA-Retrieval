@@ -64,12 +64,12 @@ class MEOW_MTM(torch.nn.Module):
                    label : torch.tensor = None, # if inference, don't need it
                    start_pos : List = None,  #for qa
                    end_pos : List = None,  #for qa
-                   return_toks : bool = False # for qa
+                   eval : bool = False # for qa
                    ):
         
         if(dataset_ind < self.support_data_num): ## is clf task
             return self.support_modulelist[dataset_ind](input_ids, mask, token_type_ids, SEPind, label)
-        return self.SQuAD_model(input_ids, mask, token_type_ids, SEPind, label, start_pos, end_pos, return_toks)
+        return self.SQuAD_model(input_ids, mask, token_type_ids, SEPind, label, start_pos, end_pos, eval)
 
     def mt_optimize(self, loss, dataset_ind):
         if dataset_ind == self.support_data_num :
