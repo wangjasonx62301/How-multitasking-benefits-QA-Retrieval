@@ -22,6 +22,7 @@ def SCRIPT_SET_TOKENIZER():
     global tokenizer
     tokenizer = BertTokenizer.from_pretrained(PRETRAINED_MODULE_NAME)
     print("SET TOKENIZER successfully")
+    return tokenizer
 
 def SCRIPT_SET_QAandSUP(check_data_loader = False, path = ''):
 
@@ -160,6 +161,87 @@ def SCRIPT_SET_MODEL(do_mtl = True, path = None, qa_optim_path = None):
 
     return MEOW_model
 
+def SCRIPT_THE_UNANSWER_FAULT():
+    #### This input the pair that has no anwer
+    #### and output the pair that the model predict this pair to has answer
+    #### mean print the model false prediction
+    
+    df_na = SQuAD_list[1].df_test
+    ind = []
+
+    for i in range(len(df_na)):
+        
+        context = df_na.iloc[i]['context']
+        question = df_na.iloc[i]['question']
+        EC = tokenizer.encode_plus(context, question)
+        
+        SEPind = [len(tokenizer.tokenize(context)) + 1]
+
+        input_ids = torch.tensor([EC['input_ids']])  # 要讓他升一個維度 表示batch
+        mask = torch.tensor([EC['attention_mask']])
+        token = torch.tensor([EC['token_type_ids']])
+
+        input_ids = input_ids.to(DEVICE)
+        mask = mask.to(DEVICE)
+        token = token.to(DEVICE)
+
+        toks, prob = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
+                                            input_ids=input_ids,
+                                            mask=mask,
+                                            token_type_ids=token,
+                                            SEPind=SEPind,
+                                            eval=True)
+        
+        hasanswer = torch.argmax(prob[0], dim=0) == 1
+
+        # pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
+        if hasanswer == True:
+            ind.append(i)
+
+    return ind
+
+def SCRIPT_THE_ANSWER_FAULT():
+    #### This input the pair that has anwer
+    #### and output the pair that the model predict this pair to has no answer
+    #### mean print the model negative true prediction
+    
+    df_ha = SQuAD_list[0].df_test
+    ind = []
+
+    for i in range(len(df_ha)):
+        
+        context = df_ha.iloc[i]['context']
+        question = df_ha.iloc[i]['question']
+        EC = tokenizer.encode_plus(context, question)
+        
+        SEPind = [len(tokenizer.tokenize(context)) + 1]
+
+        input_ids = torch.tensor([EC['input_ids']])  # 要讓他升一個維度 表示batch
+        mask = torch.tensor([EC['attention_mask']])
+        token = torch.tensor([EC['token_type_ids']])
+
+        input_ids = input_ids.to(DEVICE)
+        mask = mask.to(DEVICE)
+        token = token.to(DEVICE)
+
+        toks, prob = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
+                                            input_ids=input_ids,
+                                            mask=mask,
+                                            token_type_ids=token,
+                                            SEPind=SEPind,
+                                            eval=True)
+        
+        hasanswer = ( torch.argmax(prob[0], dim=0) == 1 )
+
+        if i == 4 :
+            print(hasanswer)
+
+        # pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
+        if hasanswer == False:
+            ind.append(i)
+
+    return ind
+
 def SCRIPT_EVALUATE_MODEL():
     df_HA = SQuAD_list[0].df_test
     dset_HA = QA_evalaute_dataset(df_HA, tokenizer, 2)
@@ -194,7 +276,7 @@ def SCRIPT_EVALUATE_MODEL():
                                             mask = mask, 
                                             token_type_ids = token,
                                             SEPind = SEPind,
-                                            return_toks = True)
+                                            eval = True)
         
         correct_num = count_correct_num(prob, label)
         HA_total_correct += correct_num
@@ -229,7 +311,7 @@ def SCRIPT_EVALUATE_MODEL():
                                             mask = mask, 
                                             token_type_ids = token,
                                             SEPind = SEPind,
-                                            return_toks = True)
+                                            eval = True)
         
         correct_num = count_correct_num(prob, label)
         NA_total_correct += correct_num
@@ -505,13 +587,25 @@ def SCRIPT_ACK_QUESTION(context, question):
     mask = mask.to(DEVICE)
     token = token.to(DEVICE)
 
-    toks = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
-                                    input_ids=input_ids,
-                                    mask=mask,
-                                    token_type_ids=token,
-                                    SEPind=SEPind,
-                                    return_toks=True)
+    toks, prob = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
+                                        input_ids=input_ids,
+                                        mask=mask,
+                                        token_type_ids=token,
+                                        SEPind=SEPind,
+                                        eval=True)
+    
+    print("has answer probabiliy : {:4f}".format(prob[0][1]))
+    hasanswer = torch.argmax(prob[0], dim=0) == 1
 
     # pred_toks = tokenizer.convert_ids_to_tokens(toks[0])
-    print(tokenizer.decode(toks[0][0]))
+    if hasanswer == True:
+        print(tokenizer.decode(toks[0]))
+    else:
+        print("NO ANSWER")
     print('')
+
+def SCRIPT_GET_DFHA_TEST():
+    return SQuAD_list[0].df_test
+    
+def SCRIPT_GET_DFNA_TEST():
+    return SQuAD_list[1].df_test

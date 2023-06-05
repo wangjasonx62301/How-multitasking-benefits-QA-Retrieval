@@ -103,6 +103,7 @@ class Bert_QA(torch.nn.Module):
         self.target_query = target_query
         #### ---------------------------------------------------------------------------
 
+        
         self.softmax = torch.nn.Softmax(dim=1)
         self.loss_function_label = torch.nn.CrossEntropyLoss()
         self.loss_function = torch.nn.CrossEntropyLoss()
@@ -112,7 +113,7 @@ class Bert_QA(torch.nn.Module):
         input_ids : torch.tensor,
         attention_mask : torch.tensor,
         token : torch.tensor,
-        SEPind : List = None,
+        SEPind : List,
         label : torch.tensor = None, # reference dont need
         start_pos : List = None,  # reference dont need
         end_pos : List = None, # reference dont need
