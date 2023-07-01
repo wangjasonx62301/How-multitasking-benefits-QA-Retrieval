@@ -14,7 +14,7 @@ pip install -r requirements.txt
 
 ### Structure
 
-![Structure](https://i.imgur.com/likCKQo.png)
+![Structure](https://i.imgur.com/eUuJ9LG.png)
 
 
 
