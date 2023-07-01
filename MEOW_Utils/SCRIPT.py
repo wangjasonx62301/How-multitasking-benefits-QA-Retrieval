@@ -586,7 +586,7 @@ def SCRIPT_ACK_QUESTION(context, question):
     input_ids = input_ids.to(DEVICE)
     mask = mask.to(DEVICE)
     token = token.to(DEVICE)
-
+    MEOW_model.eval()
     toks, prob = MEOW_model.mt_forward(dataset_ind=DATA_IND['SQuAD'],
                                         input_ids=input_ids,
                                         mask=mask,
