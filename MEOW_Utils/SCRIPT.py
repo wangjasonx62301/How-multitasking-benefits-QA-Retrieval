@@ -147,6 +147,12 @@ def SCRIPT_SET_MODEL(do_mtl = True, path = None, qa_optim_path = None):
                       device=DEVICE
                       )
     MEOW_model.to(DEVICE)
+    
+    ############################################################
+    ## accelerate with pytorch2.0+
+        if torch.__version__ >= "2.0.0":
+            MEOW_model = torch.compile(MEOW_model)
+    ############################################################
 
     if path != None:
         MEOW_model.load_state_dict(torch.load(path))
@@ -359,6 +365,7 @@ def SCRIPT_TRAIN_SUPPORT(epoch_num):
         ################################################################################################################
         MEOW_model.train()
 
+        
         support_data_training_iter = [iter(db.training_dataloader) for db in SUP_list]
 
         for _ in range(Training_round):
